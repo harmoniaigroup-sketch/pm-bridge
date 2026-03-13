@@ -1,0 +1,15 @@
+{
+  "name": "pm-bridge",
+  "version": "1.0.0",
+  "description": "Prompt Maestro Twilio-ElevenLabs Bridge — Connects Twilio messaging channels to ElevenLabs Conversational AI agents via WebSocket",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "ws": "^8.18.0",
+    "twilio": "^5.4.0"
+  }
+}
