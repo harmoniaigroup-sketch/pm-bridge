@@ -101,25 +101,24 @@ app.post("/webhook/twilio-bridge", async (req, res) => {
   console.log(`[Twilio] From=${From} To=${To} Body="${Body?.substring(0, 50)}..." Media=${NumMedia || 0}`);
 
   if (!Body && (!NumMedia || NumMedia === "0")) {
-    // Empty message, acknowledge
     return res.type("text/xml").send("<Response></Response>");
   }
 
+  // Respond 200 OK immediately — Twilio needs this fast to avoid retries
+  res.type("text/xml").send("<Response></Response>");
+
+  // Process asynchronously: look up doctor, call ElevenLabs, send reply via REST API
   try {
-    // Look up doctor by Twilio phone number (To)
     const doctor = await lookupDoctor(To);
 
     if (!doctor) {
       console.error(`[Twilio] No doctor found for number: ${To}`);
-      const twiml = new twilio.twiml.MessagingResponse();
-      twiml.message("Lo siento, este número no está configurado. Por favor contacta a tu doctor directamente.");
-      return res.type("text/xml").send(twiml.toString());
+      await sendTwilioMessage(To, From, "Lo siento, este número no está configurado. Por favor contacta a tu doctor directamente.");
+      return;
     }
 
-    // Use message text (or handle audio in future)
     const messageText = Body || "[Audio message — transcription not yet implemented]";
 
-    // Send to ElevenLabs agent
     const agentResponse = await sessionManager.sendMessage({
       doctorId: doctor.doctor_id,
       agentId: doctor.agent_id,
@@ -128,19 +127,31 @@ app.post("/webhook/twilio-bridge", async (req, res) => {
       dynamicVariables: doctor.dynamic_variables,
     });
 
-    // Respond to Twilio
-    const twiml = new twilio.twiml.MessagingResponse();
-    twiml.message(agentResponse);
-    res.type("text/xml").send(twiml.toString());
+    // Send response via Twilio REST API (not TwiML)
+    await sendTwilioMessage(To, From, agentResponse);
 
     console.log(`[Twilio] Responded to ${From} via ${doctor.doctor_id}: "${agentResponse.substring(0, 80)}..."`);
   } catch (err) {
     console.error(`[Twilio] Error processing message:`, err.message);
-    const twiml = new twilio.twiml.MessagingResponse();
-    twiml.message("Disculpa, estoy experimentando problemas técnicos. Por favor intenta de nuevo en unos minutos.");
-    res.type("text/xml").send(twiml.toString());
+    await sendTwilioMessage(To, From, "Disculpa, estoy experimentando problemas técnicos. Por favor intenta de nuevo en unos minutos.").catch(() => {});
   }
 });
+
+/**
+ * Send a message via Twilio REST API (async, independent of webhook response).
+ */
+async function sendTwilioMessage(from, to, body) {
+  if (!twilioClient) {
+    console.error("[Twilio] Cannot send message: Twilio client not initialized");
+    return;
+  }
+  try {
+    const msg = await twilioClient.messages.create({ from, to, body });
+    console.log(`[Twilio REST] Sent to ${to} (sid=${msg.sid})`);
+  } catch (err) {
+    console.error(`[Twilio REST] Failed to send to ${to}:`, err.message);
+  }
+}
 
 /**
  * Look up doctor config by Twilio phone number.
