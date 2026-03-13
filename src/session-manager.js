@@ -166,6 +166,7 @@ class SessionManager {
         agentResponseTimer: null,
         connected: false,
         isReconnect,
+        suppressFirstMessage: isReconnect, // On reconnect, ignore the initial greeting
       };
 
       ws.on("open", () => {
@@ -204,9 +205,9 @@ class SessionManager {
           // (B) If reconnecting, override first_message to suppress re-greeting
           if (isReconnect) {
             initConfig.conversation_initiation_client_data.conversation_config_override.agent = {
-              first_message: "",
+              first_message: " ",
             };
-            console.log(`[Session ${key}] Reconnect: suppressed first_message via override`);
+            console.log(`[Session ${key}] Reconnect: suppressed first_message via override (space char)`);
           }
 
           if (dynamicVariables) {
@@ -232,12 +233,16 @@ class SessionManager {
           resolve(session);
         }
 
-        // Handle agent text response
-        if (msg.type === "agent_response") {
-          const text = msg.agent_response_event?.agent_response || msg.agent_response || "";
+        // Handle agent text response (chat mode sends agent_chat_response_part chunks, then agent_response as final)
+        if (msg.type === "agent_chat_response_part") {
+          // On reconnect, suppress the initial greeting (first_message override may not work)
+          if (session.suppressFirstMessage && !session.pendingResolve) {
+            console.log(`[Session ${key}] Suppressing first_message chunk (reconnect)`);
+            return;
+          }
+          const text = msg.agent_chat_response_part_event?.text || msg.text || "";
           if (text) {
             session.agentResponseBuffer += text;
-            // Debounce: wait for agent to finish sending chunks
             clearTimeout(session.agentResponseTimer);
             session.agentResponseTimer = setTimeout(() => {
               if (session.pendingResolve) {
@@ -246,6 +251,23 @@ class SessionManager {
                 session.agentResponseBuffer = "";
               }
             }, 1500);
+          }
+        }
+
+        if (msg.type === "agent_response") {
+          // On reconnect, suppress the initial greeting
+          if (session.suppressFirstMessage && !session.pendingResolve) {
+            console.log(`[Session ${key}] Suppressing first_message final (reconnect). Greeting was: "${(msg.agent_response_event?.agent_response || "").substring(0, 60)}..."`);
+            session.suppressFirstMessage = false; // Only suppress the first one
+            session.agentResponseBuffer = "";
+            return;
+          }
+          const text = msg.agent_response_event?.agent_response || msg.agent_response || "";
+          if (text && session.pendingResolve) {
+            clearTimeout(session.agentResponseTimer);
+            session.pendingResolve(text);
+            session.pendingResolve = null;
+            session.agentResponseBuffer = "";
           }
         }
 
