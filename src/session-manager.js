@@ -180,6 +180,11 @@ class SessionManager {
           return;
         }
 
+        // Debug: log all incoming WS message types
+        if (msg.type !== "ping" && msg.type !== "vad_score") {
+          console.log(`[Session ${key}] WS recv: ${msg.type}`);
+        }
+
         // Handle conversation initiation metadata
         if (msg.type === "conversation_initiation_metadata") {
           session.conversationId = msg.conversation_initiation_metadata_event?.conversation_id;
@@ -295,11 +300,12 @@ class SessionManager {
 
       const userMsg = {
         type: "user_message",
-        user_message: { text },
+        text,
       };
 
       try {
         session.ws.send(JSON.stringify(userMsg));
+        console.log(`[Session] Sent user_message: "${text.substring(0, 50)}..." (wsState=${session.ws.readyState})`);
       } catch (err) {
         reject(new Error(`Failed to send message: ${err.message}`));
       }
@@ -307,6 +313,7 @@ class SessionManager {
       // Hard timeout: if no response in 30s, return what we have or error
       setTimeout(() => {
         if (session.pendingResolve) {
+          console.log(`[Session] 30s timeout hit. Buffer="${session.agentResponseBuffer.substring(0, 50)}..." (${session.agentResponseBuffer.length} chars)`);
           if (session.agentResponseBuffer) {
             session.pendingResolve(session.agentResponseBuffer);
           } else {
