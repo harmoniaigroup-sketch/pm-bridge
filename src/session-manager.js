@@ -230,13 +230,29 @@ class SessionManager {
           }
 
           this.sessions.set(key, session);
-          resolve(session);
+
+          // On reconnect, wait for the greeting to arrive and discard it before resolving
+          if (isReconnect) {
+            session._resolveCreate = resolve;
+            console.log(`[Session ${key}] Reconnect: waiting for greeting to arrive before resolving session`);
+            // Safety: if greeting doesn't arrive in 5s, resolve anyway
+            setTimeout(() => {
+              if (session._resolveCreate) {
+                console.log(`[Session ${key}] Reconnect: greeting wait timeout (5s), resolving anyway`);
+                session.suppressFirstMessage = false;
+                session._resolveCreate(session);
+                session._resolveCreate = null;
+              }
+            }, 5000);
+          } else {
+            resolve(session);
+          }
         }
 
         // Handle agent text response (chat mode sends agent_chat_response_part chunks, then agent_response as final)
         if (msg.type === "agent_chat_response_part") {
           // On reconnect, suppress the initial greeting (first_message override may not work)
-          if (session.suppressFirstMessage && !session.pendingResolve) {
+          if (session.suppressFirstMessage) {
             console.log(`[Session ${key}] Suppressing first_message chunk (reconnect)`);
             return;
           }
@@ -255,11 +271,16 @@ class SessionManager {
         }
 
         if (msg.type === "agent_response") {
-          // On reconnect, suppress the initial greeting
-          if (session.suppressFirstMessage && !session.pendingResolve) {
+          // On reconnect, suppress the initial greeting and then resolve session
+          if (session.suppressFirstMessage) {
             console.log(`[Session ${key}] Suppressing first_message final (reconnect). Greeting was: "${(msg.agent_response_event?.agent_response || "").substring(0, 60)}..."`);
-            session.suppressFirstMessage = false; // Only suppress the first one
+            session.suppressFirstMessage = false;
             session.agentResponseBuffer = "";
+            // NOW the greeting is done — resolve session creation so sendMessage can proceed
+            if (session._resolveCreate) {
+              session._resolveCreate(session);
+              session._resolveCreate = null;
+            }
             return;
           }
           const text = msg.agent_response_event?.agent_response || msg.agent_response || "";
