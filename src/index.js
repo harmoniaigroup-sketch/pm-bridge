@@ -98,7 +98,10 @@ app.post("/chat", async (req, res) => {
 app.post("/webhook/twilio-bridge", async (req, res) => {
   const { From, To, Body, NumMedia, MediaUrl0, ProfileName } = req.body;
 
-  console.log(`[Twilio] From=${From} To=${To} Body="${Body?.substring(0, 50)}..." Media=${NumMedia || 0}`);
+  const fromChannel = parseChannel(From || "");
+  const toChannel = parseChannel(To || "");
+
+  console.log(`[Twilio] channel=${fromChannel.channel} From=${From} To=${To} Body="${Body?.substring(0, 50)}..." Media=${NumMedia || 0}`);
 
   if (!Body && (!NumMedia || NumMedia === "0")) {
     return res.type("text/xml").send("<Response></Response>");
@@ -109,15 +112,21 @@ app.post("/webhook/twilio-bridge", async (req, res) => {
 
   // Process asynchronously: look up doctor, call ElevenLabs, send reply via REST API
   try {
-    const doctor = await lookupDoctor(To);
+    // Parse keyword for Sandbox routing (e.g., "sofia: hola" → keyword="sofia", cleanBody="hola")
+    const { keyword, cleanBody } = parseSandboxKeyword(Body);
+    if (keyword) {
+      console.log(`[Twilio] Sandbox keyword detected: "${keyword}" → routing to mapped doctor`);
+    }
+
+    const doctor = await lookupDoctor(To, keyword);
 
     if (!doctor) {
-      console.error(`[Twilio] No doctor found for number: ${To}`);
+      console.error(`[Twilio] No doctor found for number: ${To} (keyword: ${keyword})`);
       await sendTwilioMessage(To, From, "Lo siento, este número no está configurado. Por favor contacta a tu doctor directamente.");
       return;
     }
 
-    const messageText = Body || "[Audio message — transcription not yet implemented]";
+    const messageText = cleanBody || "[Audio message — transcription not yet implemented]";
 
     const agentResponse = await sessionManager.sendMessage({
       doctorId: doctor.doctor_id,
@@ -130,7 +139,7 @@ app.post("/webhook/twilio-bridge", async (req, res) => {
     // Send response via Twilio REST API (not TwiML)
     await sendTwilioMessage(To, From, agentResponse);
 
-    console.log(`[Twilio] Responded to ${From} via ${doctor.doctor_id}: "${agentResponse.substring(0, 80)}..."`);
+    console.log(`[Twilio] Responded to ${From} via ${doctor.doctor_id} (${fromChannel.channel}): "${agentResponse.substring(0, 80)}..."`);
   } catch (err) {
     console.error(`[Twilio] Error processing message:`, err.message);
     await sendTwilioMessage(To, From, "Disculpa, estoy experimentando problemas técnicos. Por favor intenta de nuevo en unos minutos.").catch(() => {});
@@ -154,31 +163,97 @@ async function sendTwilioMessage(from, to, body) {
 }
 
 /**
- * Look up doctor config by Twilio phone number.
+ * Sandbox keyword routing map.
  * 
- * Strategy: 
- * 1. Check in-memory cache
- * 2. If miss, call n8n webhook to read Master Sheet
- * 3. Cache result for 5 minutes
+ * In Sandbox mode, all messages arrive at the same Twilio number (+14155238886).
+ * To test multiple doctors, patients prefix their message with a keyword.
  * 
- * For Sandbox mode: all messages come from the same Twilio number (+14155238886),
- * so we use a hardcoded default doctor. In production with real numbers, 
- * the To field uniquely identifies the doctor.
+ * Format: SANDBOX_DOCTOR_MAP env var is a JSON string:
+ *   { "sofia": { "doctor_id": "PM-E2E-001", "agent_id": "agent_..." }, ... }
+ * 
+ * If no keyword matches, falls back to SANDBOX_DOCTOR_ID / SANDBOX_AGENT_ID.
+ * 
+ * TEMPORARY: Remove when each doctor has their own Twilio number (production).
  */
-async function lookupDoctor(toNumber) {
-  // Normalize phone number (remove whatsapp: prefix if present)
-  const phone = toNumber.replace("whatsapp:", "").replace("+", "");
+const SANDBOX_NUMBER = "14155238886";
+let sandboxDoctorMap = {};
+try {
+  sandboxDoctorMap = JSON.parse(process.env.SANDBOX_DOCTOR_MAP || "{}");
+} catch (e) {
+  console.warn("[Config] Failed to parse SANDBOX_DOCTOR_MAP, using empty map");
+}
 
-  // Check cache
-  const cached = doctorCache.get(phone);
-  if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
-    return cached.data;
+/**
+ * Parse keyword prefix from message body for Sandbox routing.
+ * Supports formats: "sofia: mensaje", "sofia mensaje", "s: mensaje", "s mensaje"
+ * Returns { keyword, cleanBody } or { keyword: null, cleanBody: originalBody }
+ */
+function parseSandboxKeyword(body) {
+  if (!body) return { keyword: null, cleanBody: body };
+
+  const trimmed = body.trim();
+  // Match: keyword (optionally followed by : or space) then the actual message
+  const match = trimmed.match(/^(\w+)\s*:\s*(.+)$/is);
+  if (match) {
+    return { keyword: match[1].toLowerCase(), cleanBody: match[2].trim() };
   }
 
-  // Sandbox mode: hardcoded default doctor
-  // The Sandbox number is shared, so all messages go to the same doctor
-  const SANDBOX_NUMBER = "14155238886";
-  if (phone === SANDBOX_NUMBER) {
+  // Also check for keyword as standalone first word (no colon)
+  const words = trimmed.split(/\s+/);
+  if (words.length > 1) {
+    const firstWord = words[0].toLowerCase();
+    if (sandboxDoctorMap[firstWord]) {
+      return { keyword: firstWord, cleanBody: words.slice(1).join(" ") };
+    }
+  }
+
+  return { keyword: null, cleanBody: body };
+}
+
+/**
+ * Normalize the channel type from Twilio's From/To fields.
+ * Twilio prefixes: "whatsapp:+52...", "messenger:...", plain "+52..." = SMS
+ * Returns: { channel: "whatsapp"|"messenger"|"sms", phone: "+52..." }
+ */
+function parseChannel(twilioAddress) {
+  if (twilioAddress.startsWith("whatsapp:")) {
+    return { channel: "whatsapp", phone: twilioAddress.replace("whatsapp:", "") };
+  }
+  if (twilioAddress.startsWith("messenger:")) {
+    return { channel: "messenger", phone: twilioAddress.replace("messenger:", "") };
+  }
+  return { channel: "sms", phone: twilioAddress };
+}
+
+/**
+ * Look up doctor config by Twilio phone number (+ optional keyword for Sandbox).
+ * 
+ * Strategy: 
+ * 1. Sandbox mode: use keyword routing map or default doctor
+ * 2. Production mode: check in-memory cache, then n8n webhook → Master Sheet
+ * 3. Cache result for 5 minutes
+ * 
+ * Returns: { doctor_id, agent_id, dynamic_variables }
+ */
+async function lookupDoctor(toNumber, keyword) {
+  // Normalize phone number (remove channel prefix)
+  const { phone } = parseChannel(toNumber);
+  const normalizedPhone = phone.replace("+", "");
+
+  // ── Sandbox mode ──
+  if (normalizedPhone === SANDBOX_NUMBER) {
+    // Check keyword routing map first
+    if (keyword && sandboxDoctorMap[keyword]) {
+      const mapped = sandboxDoctorMap[keyword];
+      console.log(`[Lookup] Sandbox keyword "${keyword}" → doctor ${mapped.doctor_id}`);
+      return {
+        doctor_id: mapped.doctor_id,
+        agent_id: mapped.agent_id,
+        dynamic_variables: { doctor_id: mapped.doctor_id },
+      };
+    }
+
+    // Default Sandbox doctor
     const defaultDoctor = {
       doctor_id: process.env.SANDBOX_DOCTOR_ID || "PM-TEST-001",
       agent_id: process.env.SANDBOX_AGENT_ID || "agent_7001kkf42e44f3ethezn15t0dh11",
@@ -186,25 +261,30 @@ async function lookupDoctor(toNumber) {
         doctor_id: process.env.SANDBOX_DOCTOR_ID || "PM-TEST-001",
       },
     };
-    doctorCache.set(phone, { data: defaultDoctor, ts: Date.now() });
     return defaultDoctor;
   }
 
-  // Production mode: look up via n8n webhook
+  // ── Production mode: cache check ──
+  const cached = doctorCache.get(normalizedPhone);
+  if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
+    return cached.data;
+  }
+
+  // ── Production mode: look up via n8n webhook ──
   if (MASTER_SHEET_LOOKUP_URL) {
     try {
       const resp = await fetch(MASTER_SHEET_LOOKUP_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ twilio_phone_number: phone }),
+        body: JSON.stringify({ twilio_phone_number: normalizedPhone }),
       });
       const data = await resp.json();
       if (data.agent_id) {
-        doctorCache.set(phone, { data, ts: Date.now() });
+        doctorCache.set(normalizedPhone, { data, ts: Date.now() });
         return data;
       }
     } catch (err) {
-      console.error(`[Lookup] Failed to look up doctor for ${phone}:`, err.message);
+      console.error(`[Lookup] Failed to look up doctor for ${normalizedPhone}:`, err.message);
     }
   }
 
@@ -219,4 +299,13 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`  Health:         GET  /health`);
   console.log(`  Sandbox doctor: ${process.env.SANDBOX_DOCTOR_ID || "PM-TEST-001"}`);
   console.log(`  Sandbox agent:  ${process.env.SANDBOX_AGENT_ID || "agent_7001kkf42e44f3ethezn15t0dh11"}`);
+  const mapKeys = Object.keys(sandboxDoctorMap);
+  if (mapKeys.length > 0) {
+    console.log(`  Sandbox keyword routing:`);
+    for (const [kw, cfg] of Object.entries(sandboxDoctorMap)) {
+      console.log(`    "${kw}" → ${cfg.doctor_id} (${cfg.agent_id})`);
+    }
+  } else {
+    console.log(`  Sandbox keyword routing: none (all messages → default doctor)`);
+  }
 });
