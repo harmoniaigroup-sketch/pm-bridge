@@ -170,6 +170,11 @@ app.post("/webhook/twilio-bridge", async (req, res) => {
       patientPhone: From,
       text: messageText,
       dynamicVariables: doctor.dynamic_variables,
+      onFollowUp: (followUpText) => {
+        // Send follow-up responses (e.g., after tool calls) directly to patient
+        console.log(`[Twilio] Sending follow-up to ${From}: "${followUpText.substring(0, 80)}..."`);
+        sendTwilioMessage(To, From, followUpText);
+      },
     });
 
     // Send response via Twilio REST API (not TwiML)

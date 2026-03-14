@@ -42,7 +42,7 @@ class SessionManager {
    * Creates a new WebSocket session if none exists for this doctor+patient pair.
    * If a previous conversation exists in historyStore, injects context on reconnect.
    */
-  async sendMessage({ doctorId, agentId, patientPhone, text, dynamicVariables }) {
+  async sendMessage({ doctorId, agentId, patientPhone, text, dynamicVariables, onFollowUp }) {
     const key = this._key(doctorId, patientPhone);
     let session = this.sessions.get(key);
     let isReconnect = false;
@@ -61,6 +61,11 @@ class SessionManager {
         dynamicVariables,
         isReconnect,
       });
+    }
+
+    // Set the follow-up callback so post-tool responses get sent to patient
+    if (onFollowUp) {
+      session.sendFollowUp = onFollowUp;
     }
 
     // Reset inactivity timeout on the history store
@@ -167,6 +172,7 @@ class SessionManager {
         connected: false,
         isReconnect,
         suppressFirstMessage: isReconnect, // On reconnect, ignore the initial greeting
+        sendFollowUp: null, // Callback to send additional responses after tool calls
       };
 
       ws.on("open", () => {
@@ -260,13 +266,27 @@ class SessionManager {
           if (text) {
             session.agentResponseBuffer += text;
             clearTimeout(session.agentResponseTimer);
-            session.agentResponseTimer = setTimeout(() => {
-              if (session.pendingResolve) {
-                session.pendingResolve(session.agentResponseBuffer);
-                session.pendingResolve = null;
-                session.agentResponseBuffer = "";
-              }
-            }, 1500);
+
+            if (session.pendingResolve) {
+              // Primary response path — resolve when chunks stop arriving
+              session.agentResponseTimer = setTimeout(() => {
+                if (session.pendingResolve) {
+                  session.pendingResolve(session.agentResponseBuffer);
+                  session.pendingResolve = null;
+                  session.agentResponseBuffer = "";
+                }
+              }, 1500);
+            } else if (session.sendFollowUp) {
+              // Follow-up path (post-tool) — send via Twilio when chunks stop
+              session.agentResponseTimer = setTimeout(() => {
+                if (session.agentResponseBuffer && session.sendFollowUp) {
+                  console.log(`[Session ${key}] Follow-up (chunked) after tool call (${session.agentResponseBuffer.length} chars)`);
+                  session.sendFollowUp(session.agentResponseBuffer);
+                  this._addToHistory(key, "agent", session.agentResponseBuffer);
+                  session.agentResponseBuffer = "";
+                }
+              }, 1500);
+            }
           }
         }
 
@@ -285,10 +305,17 @@ class SessionManager {
           }
           const text = msg.agent_response_event?.agent_response || msg.agent_response || "";
           if (text && session.pendingResolve) {
+            // Primary response — resolve the sendMessage promise
             clearTimeout(session.agentResponseTimer);
             session.pendingResolve(text);
             session.pendingResolve = null;
             session.agentResponseBuffer = "";
+          } else if (text && !session.pendingResolve && session.sendFollowUp) {
+            // Follow-up response after tool call — send directly via Twilio
+            console.log(`[Session ${key}] Follow-up response after tool call (${text.length} chars): "${text.substring(0, 80)}..."`);
+            session.sendFollowUp(text);
+            // Record in history
+            this._addToHistory(key, "agent", text);
           }
         }
 
