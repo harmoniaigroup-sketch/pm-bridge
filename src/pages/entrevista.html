@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Configura tu Asistente — Prompt Maestro</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --royal-blue: #0e168c;
+      --dark-navy: #0b1030;
+      --accent-teal: #00c9a7;
+      --heading-silver: #e6e9f0;
+      --body-silver: #c8cde0;
+      --secondary-silver: #919bbe;
+      --white: #ffffff;
+      --bg-light: #f6f7fb;
+      --success-green: #10b981;
+      --warning-amber: #f59e0b;
+      --error-red: #ef4444;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg-light);
+      color: #1a1a2e;
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    .header {
+      background: linear-gradient(135deg, var(--dark-navy), var(--royal-blue));
+      padding: 24px 20px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    .header__logo {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.5rem;
+      color: var(--white);
+      letter-spacing: 0.02em;
+    }
+
+    .header__subtitle {
+      font-size: 0.85rem;
+      color: var(--secondary-silver);
+      margin-top: 4px;
+      font-weight: 300;
+    }
+
+    .header__doctor {
+      display: inline-block;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 20px;
+      padding: 6px 16px;
+      font-size: 0.8rem;
+      color: var(--body-silver);
+      margin-top: 10px;
+    }
+
+    /* Loading state */
+    .loading-screen {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 40px;
+    }
+
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid #e5e7eb;
+      border-top-color: var(--royal-blue);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-text {
+      font-size: 0.95rem;
+      color: #6b7280;
+    }
+
+    /* Error state */
+    .error-screen {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 24px;
+      text-align: center;
+    }
+
+    .error-screen__icon {
+      width: 56px; height: 56px;
+      background: #fef2f2;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem;
+      margin-bottom: 16px;
+    }
+
+    .error-screen__title {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.3rem;
+      color: #1a1a2e;
+      margin-bottom: 8px;
+    }
+
+    .error-screen__message {
+      font-size: 0.9rem;
+      color: #6b7280;
+      max-width: 400px;
+      line-height: 1.5;
+    }
+
+    .error-screen__link {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 10px 24px;
+      background: var(--royal-blue);
+      color: var(--white);
+      text-decoration: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
+
+    /* Chat area */
+    .chat-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      max-width: 720px;
+      width: 100%;
+      margin: 0 auto;
+      overflow: hidden;
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      scroll-behavior: smooth;
+    }
+
+    .message {
+      max-width: 85%;
+      padding: 12px 16px;
+      border-radius: 16px;
+      font-size: 0.92rem;
+      line-height: 1.55;
+      animation: msgIn 0.25s ease-out;
+      word-wrap: break-word;
+    }
+
+    @keyframes msgIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message--agent {
+      background: var(--white);
+      border: 1px solid #e5e7eb;
+      border-bottom-left-radius: 4px;
+      align-self: flex-start;
+      color: #1a1a2e;
+    }
+
+    .message--user {
+      background: var(--royal-blue);
+      color: var(--white);
+      border-bottom-right-radius: 4px;
+      align-self: flex-end;
+    }
+
+    .message--system {
+      align-self: center;
+      background: #fefce8;
+      border: 1px solid #fde68a;
+      color: #92400e;
+      font-size: 0.82rem;
+      text-align: center;
+      max-width: 90%;
+    }
+
+    .typing-indicator {
+      align-self: flex-start;
+      padding: 12px 16px;
+      background: var(--white);
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      border-bottom-left-radius: 4px;
+      display: none;
+    }
+
+    .typing-indicator.visible { display: flex; gap: 4px; align-items: center; }
+
+    .typing-dot {
+      width: 7px; height: 7px;
+      background: #9ca3af;
+      border-radius: 50%;
+      animation: typingBounce 1.2s ease-in-out infinite;
+    }
+
+    .typing-dot:nth-child(2) { animation-delay: 0.15s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
+    @keyframes typingBounce {
+      0%, 60%, 100% { transform: translateY(0); }
+      30% { transform: translateY(-5px); }
+    }
+
+    /* Input area */
+    .chat-input-area {
+      flex-shrink: 0;
+      padding: 12px 16px 20px;
+      background: var(--white);
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .chat-input-wrapper {
+      display: flex;
+      gap: 8px;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    .chat-input {
+      flex: 1;
+      padding: 12px 16px;
+      border: 1.5px solid #d1d5db;
+      border-radius: 12px;
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.92rem;
+      outline: none;
+      transition: border-color 0.2s;
+      resize: none;
+      min-height: 44px;
+      max-height: 120px;
+      line-height: 1.4;
+    }
+
+    .chat-input:focus { border-color: var(--royal-blue); }
+    .chat-input:disabled { background: #f3f4f6; color: #9ca3af; }
+
+    .chat-send-btn {
+      width: 44px; height: 44px;
+      background: var(--royal-blue);
+      color: var(--white);
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.2s, transform 0.1s;
+    }
+
+    .chat-send-btn:hover { background: #0a1270; }
+    .chat-send-btn:active { transform: scale(0.95); }
+    .chat-send-btn:disabled { background: #9ca3af; cursor: default; transform: none; }
+
+    .chat-send-btn svg { width: 20px; height: 20px; }
+
+    /* Post-interview panel */
+    .post-interview {
+      display: none;
+      padding: 24px 16px;
+      text-align: center;
+      flex-shrink: 0;
+      background: var(--white);
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .post-interview.visible { display: block; }
+
+    .post-interview__title {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.2rem;
+      color: #1a1a2e;
+      margin-bottom: 8px;
+    }
+
+    .post-interview__subtitle {
+      font-size: 0.85rem;
+      color: #6b7280;
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+
+    .btn-calendar {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 28px;
+      background: var(--accent-teal);
+      color: var(--white);
+      font-family: 'Outfit', sans-serif;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.2s, transform 0.1s;
+      margin-bottom: 12px;
+    }
+
+    .btn-calendar:hover { background: #00b396; }
+    .btn-calendar:active { transform: scale(0.97); }
+
+    .btn-calendar svg { width: 22px; height: 22px; }
+
+    .btn-skip {
+      display: block;
+      margin: 0 auto;
+      padding: 8px 16px;
+      background: none;
+      border: none;
+      color: #9ca3af;
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.85rem;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    .btn-skip:hover { color: #6b7280; }
+
+    /* Completed state */
+    .completed-panel {
+      display: none;
+      padding: 40px 24px;
+      text-align: center;
+    }
+
+    .completed-panel.visible { display: flex; flex-direction: column; align-items: center; }
+
+    .completed-panel__icon {
+      width: 64px; height: 64px;
+      background: #ecfdf5;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.8rem;
+      margin-bottom: 16px;
+    }
+
+    .completed-panel__title {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.3rem;
+      color: #1a1a2e;
+      margin-bottom: 8px;
+    }
+
+    .completed-panel__text {
+      font-size: 0.9rem;
+      color: #6b7280;
+      max-width: 440px;
+      line-height: 1.6;
+    }
+
+    /* Mobile adjustments */
+    @media (max-width: 480px) {
+      .header { padding: 18px 16px; }
+      .header__logo { font-size: 1.3rem; }
+      .message { max-width: 90%; }
+      .chat-input-area { padding: 10px 12px 16px; }
+      .post-interview { padding: 20px 12px; }
+    }
+
+    /* Safe area for iOS */
+    @supports (padding-bottom: env(safe-area-inset-bottom)) {
+      .chat-input-area { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+    }
+
+    /* Hide sections */
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header" id="header">
+    <div class="header__logo">Prompt Maestro</div>
+    <div class="header__subtitle">Configuración de tu asistente virtual</div>
+    <div class="header__doctor" id="headerDoctor" style="display:none"></div>
+  </div>
+
+  <!-- Loading state -->
+  <div class="loading-screen" id="loadingScreen">
+    <div class="spinner"></div>
+    <div class="loading-text">Verificando tu acceso...</div>
+  </div>
+
+  <!-- Error state -->
+  <div class="error-screen hidden" id="errorScreen">
+    <div class="error-screen__icon">⚠️</div>
+    <div class="error-screen__title" id="errorTitle">Acceso no válido</div>
+    <div class="error-screen__message" id="errorMessage">No pudimos verificar tu sesión. Por favor revisa el link que recibiste por email.</div>
+    <a href="https://prompt-maestro.com" class="error-screen__link">Ir al inicio</a>
+  </div>
+
+  <!-- Chat container -->
+  <div class="chat-container hidden" id="chatContainer">
+    <div class="chat-messages" id="chatMessages">
+      <!-- Messages render here -->
+      <div class="typing-indicator" id="typingIndicator">
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+      </div>
+    </div>
+
+    <!-- Post-interview: Calendar OAuth -->
+    <div class="post-interview" id="postInterview">
+      <div class="post-interview__title">¡Excelente! Último paso</div>
+      <div class="post-interview__subtitle">Conecta tu Google Calendar para que tu asistente pueda consultar disponibilidad y agendar citas automáticamente.</div>
+      <a class="btn-calendar" id="btnCalendar" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="16" y1="2" x2="16" y2="6"></line>
+          <line x1="8" y1="2" x2="8" y2="6"></line>
+          <line x1="3" y1="10" x2="21" y2="10"></line>
+        </svg>
+        Conectar Google Calendar
+      </a>
+      <button class="btn-skip" id="btnSkip">Saltar este paso →</button>
+    </div>
+
+    <!-- Input area -->
+    <div class="chat-input-area" id="chatInputArea">
+      <div class="chat-input-wrapper">
+        <textarea
+          class="chat-input"
+          id="chatInput"
+          placeholder="Escribe tu mensaje..."
+          rows="1"
+          autocomplete="off"
+        ></textarea>
+        <button class="chat-send-btn" id="chatSendBtn" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Completed panel (shown after Calendar connect or skip) -->
+  <div class="completed-panel hidden" id="completedPanel">
+    <div class="completed-panel__icon">✅</div>
+    <div class="completed-panel__title">¡Todo listo!</div>
+    <div class="completed-panel__text" id="completedText">
+      Estamos construyendo tu asistente. Recibirás un correo en los próximos minutos con el link para probarla. ¡Gracias por tu confianza!
+    </div>
+  </div>
+
+  <script>
+    // ── Config ──
+    const API_BASE = '{{API_BASE}}'; // replaced server-side
+    const N8N_BASE = '{{N8N_BASE}}';
+    const OAUTH_CLIENT_ID = '{{OAUTH_CLIENT_ID}}';
+    const OAUTH_REDIRECT_URI = '{{OAUTH_REDIRECT_URI}}';
+
+    // ── State ──
+    let doctorData = null;
+    let sessionId = null;
+    let interviewComplete = false;
+    let sending = false;
+
+    // ── DOM ──
+    const $ = id => document.getElementById(id);
+    const loadingScreen = $('loadingScreen');
+    const errorScreen = $('errorScreen');
+    const chatContainer = $('chatContainer');
+    const chatMessages = $('chatMessages');
+    const chatInput = $('chatInput');
+    const chatSendBtn = $('chatSendBtn');
+    const chatInputArea = $('chatInputArea');
+    const typingIndicator = $('typingIndicator');
+    const postInterview = $('postInterview');
+    const btnCalendar = $('btnCalendar');
+    const btnSkip = $('btnSkip');
+    const completedPanel = $('completedPanel');
+    const headerDoctor = $('headerDoctor');
+
+    // ── Init ──
+    async function init() {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('token') || params.get('lead_id');
+
+      if (!token) {
+        showError('Link incompleto', 'Este link no tiene un código de acceso válido. Por favor usa el link que recibiste en tu correo de confirmación.');
+        return;
+      }
+
+      // Generate session ID for memory continuity
+      sessionId = `interview-${token}-${Date.now()}`;
+
+      try {
+        const resp = await fetch(`${API_BASE}/api/validate-token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lead_id: token }),
+        });
+
+        const data = await resp.json();
+
+        if (!resp.ok || data.error) {
+          if (data.error === 'payment_not_confirmed') {
+            showError('Pago pendiente', 'Tu pago de anticipo aún no se ha confirmado. Si ya pagaste, espera unos minutos y vuelve a intentar.');
+          } else if (data.error === 'doctor_not_found') {
+            showError('Sesión no encontrada', 'No encontramos una sesión asociada a este link. Revisa el correo de confirmación de pago o contacta soporte.');
+          } else {
+            showError('Error de verificación', 'No pudimos verificar tu acceso. Por favor intenta de nuevo o contacta a soporte.');
+          }
+          return;
+        }
+
+        doctorData = data;
+
+        // Check if interview is already complete
+        const completedStatuses = [
+          'entrevista_completa', 'permisos_completos', 'configuracion_generada',
+          'agente_creado', 'canales_activos', 'agente_listo_para_prueba',
+          'pago_final_completo', 'en_produccion'
+        ];
+
+        if (completedStatuses.includes(data.pipeline_status)) {
+          // Already past interview — show completed or Calendar step
+          if (data.pipeline_status === 'entrevista_completa') {
+            showChat();
+            showPostInterview();
+          } else {
+            showCompleted('Tu asistente ya está en proceso de construcción. Recibirás un correo cuando esté listo para probar.');
+          }
+          return;
+        }
+
+        // Show chat and send initial greeting trigger
+        showChat();
+        headerDoctor.textContent = `Dr(a). ${data.doctor_name}`;
+        headerDoctor.style.display = 'inline-block';
+
+        // Auto-send a greeting to trigger the entrevistador
+        await sendMessage('Hola, estoy listo para configurar mi asistente.', true);
+
+      } catch (err) {
+        console.error('Init error:', err);
+        showError('Error de conexión', 'No pudimos conectar con el servidor. Revisa tu conexión a internet e intenta de nuevo.');
+      }
+    }
+
+    function showError(title, message) {
+      loadingScreen.classList.add('hidden');
+      $('errorTitle').textContent = title;
+      $('errorMessage').textContent = message;
+      errorScreen.classList.remove('hidden');
+    }
+
+    function showChat() {
+      loadingScreen.classList.add('hidden');
+      chatContainer.classList.remove('hidden');
+      chatInput.focus();
+    }
+
+    function showPostInterview() {
+      interviewComplete = true;
+      chatInputArea.classList.add('hidden');
+      postInterview.classList.add('visible');
+
+      // Build Calendar OAuth URL
+      if (doctorData) {
+        const calendarOAuthUrl = buildCalendarOAuthUrl(doctorData.doctor_id);
+        btnCalendar.href = calendarOAuthUrl;
+      }
+    }
+
+    function showCompleted(text) {
+      loadingScreen.classList.add('hidden');
+      chatContainer.classList.add('hidden');
+      completedPanel.classList.remove('hidden');
+      completedPanel.classList.add('visible');
+      if (text) $('completedText').textContent = text;
+    }
+
+    function buildCalendarOAuthUrl(doctorId) {
+      const params = new URLSearchParams({
+        client_id: OAUTH_CLIENT_ID,
+        redirect_uri: OAUTH_REDIRECT_URI,
+        response_type: 'code',
+        scope: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly',
+        access_type: 'offline',
+        prompt: 'consent',
+        state: doctorId,
+      });
+      return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+    }
+
+    // ── Chat functions ──
+
+    function addMessage(text, type) {
+      const div = document.createElement('div');
+      div.className = `message message--${type}`;
+      // Convert basic markdown-like formatting
+      div.innerHTML = formatText(text);
+      chatMessages.insertBefore(div, typingIndicator);
+      scrollToBottom();
+    }
+
+    function formatText(text) {
+      // Basic formatting: **bold**, newlines
+      return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+    }
+
+    function scrollToBottom() {
+      requestAnimationFrame(() => {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      });
+    }
+
+    function showTyping(show) {
+      typingIndicator.classList.toggle('visible', show);
+      if (show) scrollToBottom();
+    }
+
+    async function sendMessage(text, isAutoGreeting = false) {
+      if (sending || interviewComplete) return;
+      if (!text.trim()) return;
+
+      sending = true;
+      chatSendBtn.disabled = true;
+      chatInput.disabled = true;
+
+      // Show user message (skip for auto-greeting)
+      if (!isAutoGreeting) {
+        addMessage(text, 'user');
+      }
+
+      chatInput.value = '';
+      autoResizeInput();
+      showTyping(true);
+
+      try {
+        const body = {
+          message: text,
+          doctor_id: doctorData.doctor_id,
+          doctor_name: doctorData.doctor_name,
+          doctor_phone: doctorData.phone,
+          doctor_email: doctorData.email,
+          doctor_specialty: doctorData.specialty,
+          sessionId: sessionId,
+          interview_state: null,
+          calendar_connected: doctorData.calendar_connected || false,
+          google_calendar_id: doctorData.google_calendar_id || '',
+          stripe_connected: doctorData.stripe_connected || false,
+          stripe_connect_id: doctorData.stripe_connect_id || '',
+          whatsapp_verified: doctorData.whatsapp_verified || false,
+          wa_phone_number: doctorData.wa_phone_number || '',
+        };
+
+        const resp = await fetch(`${API_BASE}/api/entrevista-chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        showTyping(false);
+
+        if (!resp.ok) {
+          addMessage('Hubo un error de conexión. Por favor intenta de nuevo.', 'system');
+          return;
+        }
+
+        const data = await resp.json();
+
+        if (data.response) {
+          addMessage(data.response, 'agent');
+        }
+
+        // Check if interview is complete
+        if (data.profile_complete) {
+          showPostInterview();
+        }
+
+      } catch (err) {
+        showTyping(false);
+        console.error('Send error:', err);
+        addMessage('Error de conexión. Revisa tu internet e intenta de nuevo.', 'system');
+      } finally {
+        sending = false;
+        chatSendBtn.disabled = false;
+        chatInput.disabled = false;
+        if (!interviewComplete) chatInput.focus();
+      }
+    }
+
+    // ── Input handling ──
+
+    chatInput.addEventListener('input', () => {
+      chatSendBtn.disabled = !chatInput.value.trim();
+      autoResizeInput();
+    });
+
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (chatInput.value.trim()) sendMessage(chatInput.value);
+      }
+    });
+
+    chatSendBtn.addEventListener('click', () => {
+      if (chatInput.value.trim()) sendMessage(chatInput.value);
+    });
+
+    function autoResizeInput() {
+      chatInput.style.height = 'auto';
+      chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+    }
+
+    // ── Calendar / Skip handlers ──
+
+    btnSkip.addEventListener('click', async () => {
+      btnSkip.disabled = true;
+      btnSkip.textContent = 'Procesando...';
+
+      try {
+        await fetch(`${API_BASE}/api/skip-calendar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ doctor_id: doctorData.doctor_id }),
+        });
+      } catch (e) {
+        console.warn('Skip calendar call failed (non-blocking):', e);
+      }
+
+      showCompleted('Tu asistente se construirá usando los horarios que configuraste en la entrevista. Recibirás un correo cuando esté listo.');
+    });
+
+    // ── Check for OAuth callback return ──
+    function checkOAuthReturn() {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('calendar_connected') === 'true') {
+        showCompleted('¡Google Calendar conectado exitosamente! Estamos construyendo tu asistente. Recibirás un correo en los próximos minutos.');
+        return true;
+      }
+      return false;
+    }
+
+    // ── Start ──
+    if (!checkOAuthReturn()) {
+      init();
+    }
+  </script>
+</body>
+</html>
