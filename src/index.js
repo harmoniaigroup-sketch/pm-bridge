@@ -18,6 +18,7 @@ const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const BRIDGE_AUTH_TOKEN = process.env.BRIDGE_AUTH_TOKEN || "pm-bridge-secret-2026";
 const MASTER_SHEET_LOOKUP_URL = process.env.MASTER_SHEET_LOOKUP_URL; // n8n webhook URL to look up doctor by phone
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY; // For Whisper STT (voice transcription add-on)
 
 if (!EL_API_KEY) {
   console.error("FATAL: ELEVENLABS_API_KEY environment variable is required");
@@ -96,14 +97,17 @@ app.post("/chat", async (req, res) => {
  * and respond to Twilio with the agent's text response.
  */
 app.post("/webhook/twilio-bridge", async (req, res) => {
-  const { From, To, Body, NumMedia, MediaUrl0, ProfileName } = req.body;
+  const { From, To, Body, NumMedia, MediaUrl0, MediaContentType0, ProfileName } = req.body;
 
   const fromChannel = parseChannel(From || "");
   const toChannel = parseChannel(To || "");
 
-  console.log(`[Twilio] channel=${fromChannel.channel} From=${From} To=${To} Body="${Body?.substring(0, 50)}..." Media=${NumMedia || 0}`);
+  const hasMedia = NumMedia && parseInt(NumMedia, 10) > 0;
+  const isAudio = hasMedia && MediaContentType0 && MediaContentType0.startsWith("audio/");
 
-  if (!Body && (!NumMedia || NumMedia === "0")) {
+  console.log(`[Twilio] channel=${fromChannel.channel} From=${From} To=${To} Body="${Body?.substring(0, 50) || ""}" Media=${NumMedia || 0}${isAudio ? ` (audio: ${MediaContentType0})` : ""}`);
+
+  if (!Body && !hasMedia) {
     return res.type("text/xml").send("<Response></Response>");
   }
 
@@ -126,7 +130,39 @@ app.post("/webhook/twilio-bridge", async (req, res) => {
       return;
     }
 
-    const messageText = cleanBody || "[Audio message — transcription not yet implemented]";
+    // --- Determine message text ---
+    let messageText = cleanBody;
+
+    if (isAudio && !cleanBody) {
+      // Voice note received with no text body
+      if (!doctor.enable_voice_transcription) {
+        // Add-on NOT active → placeholder response, skip ElevenLabs
+        console.log(`[Twilio] Voice note from ${From} — transcription DISABLED for ${doctor.doctor_id}`);
+        await sendTwilioMessage(To, From,
+          "Recibí su nota de voz. Por el momento solo puedo leer mensajes de texto. " +
+          "¿Podría escribirme su consulta? Con gusto le ayudo."
+        );
+        return;
+      }
+
+      // Add-on ACTIVE → transcribe via Whisper
+      console.log(`[Twilio] Voice note from ${From} — transcribing for ${doctor.doctor_id}`);
+      try {
+        messageText = await transcribeAudio(MediaUrl0);
+        console.log(`[Whisper] Transcription (${messageText.length} chars): "${messageText.substring(0, 80)}..."`);
+      } catch (transcriptionErr) {
+        console.error(`[Whisper] Transcription failed:`, transcriptionErr.message);
+        await sendTwilioMessage(To, From,
+          "Disculpa, no pude procesar tu nota de voz. ¿Podrías escribirme tu consulta o enviar otra nota?"
+        );
+        return;
+      }
+    }
+
+    // If still no text (e.g., non-audio media like image), use a descriptive fallback
+    if (!messageText) {
+      messageText = "[El paciente envió un archivo multimedia que no puedo procesar]";
+    }
 
     const agentResponse = await sessionManager.sendMessage({
       doctorId: doctor.doctor_id,
@@ -145,6 +181,88 @@ app.post("/webhook/twilio-bridge", async (req, res) => {
     await sendTwilioMessage(To, From, "Disculpa, estoy experimentando problemas técnicos. Por favor intenta de nuevo en unos minutos.").catch(() => {});
   }
 });
+
+/**
+ * Download audio from Twilio MediaUrl and transcribe via OpenAI Whisper API.
+ * 
+ * Twilio MediaUrl requires Basic Auth (Account SID + Auth Token).
+ * Whisper expects multipart/form-data with the audio file.
+ * 
+ * Returns: transcribed text string
+ * Throws: on download failure, API error, or empty transcription
+ */
+async function transcribeAudio(mediaUrl) {
+  if (!OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY not configured — cannot transcribe audio");
+  }
+  if (!mediaUrl) {
+    throw new Error("No MediaUrl provided");
+  }
+
+  // Step 1: Download audio from Twilio (requires Basic Auth)
+  const twilioAuth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString("base64");
+  const audioResponse = await fetch(mediaUrl, {
+    headers: { Authorization: `Basic ${twilioAuth}` },
+  });
+
+  if (!audioResponse.ok) {
+    throw new Error(`Failed to download audio: ${audioResponse.status} ${audioResponse.statusText}`);
+  }
+
+  const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+  const contentType = audioResponse.headers.get("content-type") || "audio/ogg";
+
+  // Determine file extension from content type
+  const extMap = { "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/amr": "amr", "audio/wav": "wav" };
+  const ext = extMap[contentType.split(";")[0]] || "ogg";
+
+  console.log(`[Whisper] Downloaded audio: ${audioBuffer.length} bytes, type=${contentType}`);
+
+  // Step 2: Send to OpenAI Whisper API (multipart/form-data)
+  const boundary = "----PMBridgeWhisper" + Date.now();
+  const formParts = [
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="voice.${ext}"\r\nContent-Type: ${contentType}\r\n\r\n`,
+    audioBuffer,
+    `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1`,
+    `\r\n--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\nes`,
+    `\r\n--${boundary}\r\nContent-Disposition: form-data; name="response_format"\r\n\r\njson`,
+    `\r\n--${boundary}--\r\n`,
+  ];
+
+  // Concatenate text parts and binary buffer into a single body
+  const textEncoder = new TextEncoder();
+  const parts = formParts.map(p => (typeof p === "string" ? textEncoder.encode(p) : new Uint8Array(p)));
+  const totalLength = parts.reduce((sum, p) => sum + p.length, 0);
+  const body = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const part of parts) {
+    body.set(part, offset);
+    offset += part.length;
+  }
+
+  const whisperResponse = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
+    },
+    body,
+  });
+
+  if (!whisperResponse.ok) {
+    const errText = await whisperResponse.text().catch(() => "unknown");
+    throw new Error(`Whisper API error: ${whisperResponse.status} — ${errText}`);
+  }
+
+  const result = await whisperResponse.json();
+  const transcript = (result.text || "").trim();
+
+  if (!transcript) {
+    throw new Error("Whisper returned empty transcription");
+  }
+
+  return transcript;
+}
 
 /**
  * Send a message via Twilio REST API (async, independent of webhook response).
@@ -249,6 +367,7 @@ async function lookupDoctor(toNumber, keyword) {
       return {
         doctor_id: mapped.doctor_id,
         agent_id: mapped.agent_id,
+        enable_voice_transcription: mapped.enable_voice_transcription || false,
         dynamic_variables: { doctor_id: mapped.doctor_id },
       };
     }
@@ -257,6 +376,7 @@ async function lookupDoctor(toNumber, keyword) {
     const defaultDoctor = {
       doctor_id: process.env.SANDBOX_DOCTOR_ID || "PM-TEST-001",
       agent_id: process.env.SANDBOX_AGENT_ID || "agent_7001kkf42e44f3ethezn15t0dh11",
+      enable_voice_transcription: process.env.SANDBOX_ENABLE_VOICE === "true",
       dynamic_variables: {
         doctor_id: process.env.SANDBOX_DOCTOR_ID || "PM-TEST-001",
       },
