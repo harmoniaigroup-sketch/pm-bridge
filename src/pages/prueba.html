@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Prueba tu asistente — Prompt Maestro</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --royal-blue: #0e168c;
+      --dark-navy: #0b1030;
+      --accent-teal: #00c9a7;
+      --accent-teal-dim: rgba(0, 201, 167, 0.15);
+      --accent-teal-glow: rgba(0, 201, 167, 0.3);
+      --text-heading: #e6e9f0;
+      --text-body: #c8cde0;
+      --text-secondary: #919bbe;
+      --text-white: #ffffff;
+      --surface-card: rgba(14, 22, 140, 0.4);
+      --surface-glass: rgba(255, 255, 255, 0.04);
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-accent: rgba(0, 201, 167, 0.25);
+      --danger: #ff4d6a;
+      --danger-dim: rgba(255, 77, 106, 0.15);
+      --warning: #ffb547;
+      --warning-dim: rgba(255, 181, 71, 0.15);
+      --success: #00c9a7;
+      --success-dim: rgba(0, 201, 167, 0.15);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--dark-navy);
+      color: var(--text-body);
+      min-height: 100vh;
+      min-height: 100dvh;
+      overflow-x: hidden;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+
+    /* === Background === */
+    .bg-mesh {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 20% 10%, rgba(14, 22, 140, 0.6) 0%, transparent 70%),
+        radial-gradient(ellipse 60% 50% at 80% 90%, rgba(0, 201, 167, 0.08) 0%, transparent 60%),
+        var(--dark-navy);
+    }
+
+    /* === Layout === */
+    .page-wrapper {
+      position: relative;
+      z-index: 1;
+      max-width: 520px;
+      margin: 0 auto;
+      padding: 24px 20px 40px;
+    }
+
+    /* === Loading State === */
+    .state-loading,
+    .state-error,
+    .state-trial,
+    .state-expired,
+    .state-completed {
+      display: none;
+    }
+    .state-loading.active,
+    .state-error.active,
+    .state-trial.active,
+    .state-expired.active,
+    .state-completed.active {
+      display: block;
+    }
+
+    .loader-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 60vh;
+      gap: 20px;
+    }
+
+    .loader-ring {
+      width: 48px;
+      height: 48px;
+      border: 3px solid var(--border-subtle);
+      border-top-color: var(--accent-teal);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loader-text {
+      font-size: 15px;
+      color: var(--text-secondary);
+      letter-spacing: 0.03em;
+    }
+
+    /* === Header === */
+    .page-header {
+      text-align: center;
+      margin-bottom: 28px;
+      animation: fadeUp 0.6s ease both;
+    }
+
+    .brand-mark {
+      font-family: 'Playfair Display', serif;
+      font-weight: 700;
+      font-size: 13px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--accent-teal);
+      margin-bottom: 16px;
+      opacity: 0.85;
+    }
+
+    .page-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-white);
+      line-height: 1.25;
+      margin-bottom: 8px;
+    }
+
+    .page-subtitle {
+      font-size: 15px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    .agent-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface-glass);
+      border: 1px solid var(--border-accent);
+      border-radius: 100px;
+      padding: 8px 18px;
+      margin-top: 16px;
+      font-size: 14px;
+      color: var(--accent-teal);
+      font-weight: 500;
+    }
+
+    .agent-badge .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-teal);
+      animation: pulse-dot 2s ease infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--accent-teal-glow); }
+      50% { opacity: 0.7; box-shadow: 0 0 0 6px transparent; }
+    }
+
+    /* === Timer === */
+    .timer-card {
+      background: var(--surface-glass);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 20px;
+      text-align: center;
+      animation: fadeUp 0.6s ease 0.1s both;
+      transition: border-color 0.4s ease;
+    }
+
+    .timer-card.warning {
+      border-color: rgba(255, 181, 71, 0.3);
+    }
+
+    .timer-card.critical {
+      border-color: rgba(255, 77, 106, 0.3);
+    }
+
+    .timer-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+      font-weight: 500;
+    }
+
+    .timer-display {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 40px;
+      font-weight: 500;
+      color: var(--text-white);
+      letter-spacing: 0.04em;
+      line-height: 1;
+      margin-bottom: 8px;
+      transition: color 0.4s ease;
+    }
+
+    .timer-card.warning .timer-display { color: var(--warning); }
+    .timer-card.critical .timer-display { color: var(--danger); }
+
+    .timer-units {
+      display: flex;
+      justify-content: center;
+      gap: 32px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .timer-progress {
+      margin-top: 16px;
+      height: 3px;
+      background: var(--border-subtle);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .timer-progress-bar {
+      height: 100%;
+      background: var(--accent-teal);
+      border-radius: 2px;
+      transition: width 1s linear, background 0.4s ease;
+    }
+
+    .timer-card.warning .timer-progress-bar { background: var(--warning); }
+    .timer-card.critical .timer-progress-bar { background: var(--danger); }
+
+    /* === WhatsApp Card === */
+    .wa-card {
+      background: linear-gradient(135deg, rgba(0, 201, 167, 0.08) 0%, rgba(14, 22, 140, 0.3) 100%);
+      border: 1px solid var(--border-accent);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 20px;
+      text-align: center;
+      animation: fadeUp 0.6s ease 0.2s both;
+    }
+
+    .wa-icon {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 12px;
+      background: rgba(37, 211, 102, 0.15);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .wa-icon svg {
+      width: 28px;
+      height: 28px;
+      fill: #25D366;
+    }
+
+    .wa-instruction {
+      font-size: 15px;
+      color: var(--text-body);
+      margin-bottom: 8px;
+      line-height: 1.5;
+    }
+
+    .wa-number {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 22px;
+      font-weight: 500;
+      color: var(--text-white);
+      letter-spacing: 0.02em;
+      margin-bottom: 16px;
+    }
+
+    .wa-open-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #25D366;
+      color: #fff;
+      font-family: 'Outfit', sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+      border: none;
+      border-radius: 12px;
+      padding: 12px 28px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .wa-open-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 20px rgba(37, 211, 102, 0.25);
+    }
+
+    .wa-open-btn:active { transform: translateY(0); }
+
+    .wa-open-btn svg {
+      width: 18px;
+      height: 18px;
+      fill: #fff;
+    }
+
+    /* === Checklist === */
+    .checklist-card {
+      background: var(--surface-glass);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 20px;
+      animation: fadeUp 0.6s ease 0.3s both;
+    }
+
+    .checklist-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-heading);
+      margin-bottom: 16px;
+    }
+
+    .checklist-items {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .checklist-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text-body);
+      padding: 10px 14px;
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 10px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      user-select: none;
+    }
+
+    .checklist-item:hover {
+      border-color: var(--border-subtle);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .checklist-item.checked {
+      opacity: 0.5;
+    }
+
+    .checklist-item.checked .check-box {
+      background: var(--accent-teal);
+      border-color: var(--accent-teal);
+    }
+
+    .checklist-item.checked .check-box svg { opacity: 1; }
+
+    .check-box {
+      flex-shrink: 0;
+      width: 22px;
+      height: 22px;
+      border: 2px solid var(--text-secondary);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      margin-top: 1px;
+    }
+
+    .check-box svg {
+      width: 14px;
+      height: 14px;
+      fill: none;
+      stroke: #fff;
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+
+    /* === Services list === */
+    .services-section {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .services-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+      font-weight: 500;
+    }
+
+    .service-chip {
+      display: inline-block;
+      font-size: 12px;
+      color: var(--text-body);
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 4px 10px;
+      margin: 0 4px 6px 0;
+    }
+
+    /* === CTA Section === */
+    .cta-section {
+      animation: fadeUp 0.6s ease 0.4s both;
+    }
+
+    .cta-primary {
+      display: block;
+      width: 100%;
+      padding: 16px 24px;
+      background: linear-gradient(135deg, var(--accent-teal), #00b894);
+      color: var(--dark-navy);
+      font-family: 'Outfit', sans-serif;
+      font-size: 17px;
+      font-weight: 700;
+      border: none;
+      border-radius: 14px;
+      cursor: pointer;
+      text-decoration: none;
+      text-align: center;
+      transition: transform 0.15s ease, box-shadow 0.2s ease;
+      letter-spacing: 0.01em;
+    }
+
+    .cta-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 28px rgba(0, 201, 167, 0.3);
+    }
+
+    .cta-primary:active { transform: translateY(0); }
+
+    .cta-secondary {
+      display: block;
+      width: 100%;
+      text-align: center;
+      margin-top: 14px;
+      padding: 12px;
+      color: var(--text-secondary);
+      font-size: 14px;
+      text-decoration: none;
+      border-radius: 10px;
+      transition: color 0.2s ease, background 0.2s ease;
+    }
+
+    .cta-secondary:hover {
+      color: var(--text-body);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    /* === Agent Summary === */
+    .summary-card {
+      background: var(--surface-glass);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 20px;
+      animation: fadeUp 0.6s ease 0.15s both;
+    }
+
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      font-size: 14px;
+    }
+
+    .summary-row:not(:last-child) {
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .summary-label {
+      color: var(--text-secondary);
+    }
+
+    .summary-value {
+      color: var(--text-heading);
+      font-weight: 500;
+    }
+
+    .summary-value.teal { color: var(--accent-teal); }
+
+    /* === Error State === */
+    .error-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 60vh;
+      text-align: center;
+      gap: 16px;
+    }
+
+    .error-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: var(--danger-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+    }
+
+    .error-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 22px;
+      color: var(--text-white);
+    }
+
+    .error-detail {
+      font-size: 14px;
+      color: var(--text-secondary);
+      max-width: 320px;
+      line-height: 1.5;
+    }
+
+    /* === Completed State === */
+    .completed-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 60vh;
+      text-align: center;
+      gap: 16px;
+    }
+
+    .completed-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: var(--success-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+    }
+
+    /* === Expired State === */
+    .expired-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 60vh;
+      text-align: center;
+      gap: 16px;
+    }
+
+    .expired-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: var(--warning-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+    }
+
+    /* === Footer === */
+    .page-footer {
+      text-align: center;
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border-subtle);
+      animation: fadeUp 0.6s ease 0.5s both;
+    }
+
+    .footer-brand {
+      font-family: 'Playfair Display', serif;
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+
+    .footer-link {
+      font-size: 12px;
+      color: var(--text-secondary);
+      text-decoration: none;
+      opacity: 0.6;
+    }
+
+    .footer-link:hover { opacity: 1; }
+
+    /* === Animations === */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* === Responsive === */
+    @media (max-width: 400px) {
+      .page-wrapper { padding: 16px 16px 32px; }
+      .page-title { font-size: 24px; }
+      .timer-display { font-size: 34px; }
+      .wa-number { font-size: 19px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-mesh"></div>
+
+  <div class="page-wrapper">
+
+    <!-- ===== LOADING ===== -->
+    <div class="state-loading active" id="stateLoading">
+      <div class="loader-container">
+        <div class="loader-ring"></div>
+        <div class="loader-text">Verificando tu sesión…</div>
+      </div>
+    </div>
+
+    <!-- ===== ERROR ===== -->
+    <div class="state-error" id="stateError">
+      <div class="error-container">
+        <div class="error-icon">⚠</div>
+        <h2 class="error-title">No se pudo cargar</h2>
+        <p class="error-detail" id="errorDetail">Este enlace no es válido o ha expirado. Verifica tu correo para el enlace correcto.</p>
+        <a href="mailto:jose.cortes@prompt-maestro.com" class="cta-secondary">Contactar soporte</a>
+      </div>
+    </div>
+
+    <!-- ===== TRIAL EXPIRED ===== -->
+    <div class="state-expired" id="stateExpired">
+      <div class="expired-container">
+        <div class="expired-icon">⏰</div>
+        <h2 class="error-title">Tu prueba ha expirado</h2>
+        <p class="error-detail">El periodo de prueba de 12 horas ha terminado. Contáctanos para reactivarla o proceder con la activación.</p>
+        <a id="expiredContactLink" href="#" class="cta-primary" style="max-width: 320px; margin-top: 8px;">Contactar a Prompt Maestro</a>
+      </div>
+    </div>
+
+    <!-- ===== ALREADY COMPLETED ===== -->
+    <div class="state-completed" id="stateCompleted">
+      <div class="completed-container">
+        <div class="completed-icon">✓</div>
+        <h2 class="error-title">¡Todo listo!</h2>
+        <p class="error-detail" id="completedDetail">Tu asistente ya está activo o en proceso de activación. Revisa tu correo para más detalles.</p>
+      </div>
+    </div>
+
+    <!-- ===== MAIN TRIAL PAGE ===== -->
+    <div class="state-trial" id="stateTrial">
+
+      <!-- Header -->
+      <header class="page-header">
+        <div class="brand-mark">Prompt Maestro</div>
+        <h1 class="page-title">Prueba tu asistente</h1>
+        <p class="page-subtitle">Envíale mensajes por WhatsApp y verifica que todo funciona como esperas.</p>
+        <div class="agent-badge">
+          <span class="dot"></span>
+          <span id="agentNameBadge">—</span>
+          <span style="color: var(--text-secondary)">está lista</span>
+        </div>
+      </header>
+
+      <!-- Timer -->
+      <div class="timer-card" id="timerCard">
+        <div class="timer-label">Tiempo restante de prueba</div>
+        <div class="timer-display" id="timerDisplay">--:--:--</div>
+        <div class="timer-units">
+          <span>horas</span>
+          <span>minutos</span>
+          <span>segundos</span>
+        </div>
+        <div class="timer-progress">
+          <div class="timer-progress-bar" id="timerBar" style="width: 100%"></div>
+        </div>
+      </div>
+
+      <!-- WhatsApp Card -->
+      <div class="wa-card">
+        <div class="wa-icon">
+          <svg viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+        </div>
+        <p class="wa-instruction">Envía un mensaje de WhatsApp a</p>
+        <div class="wa-number" id="waNumber">—</div>
+        <a id="waOpenLink" href="#" target="_blank" class="wa-open-btn">
+          <svg viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+          Abrir WhatsApp
+        </a>
+      </div>
+
+      <!-- Checklist -->
+      <div class="checklist-card">
+        <h2 class="checklist-title">Qué probar</h2>
+        <div class="checklist-items" id="checklistItems">
+          <div class="checklist-item" onclick="toggleCheck(this)">
+            <div class="check-box"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <span>Saluda y verifica que responda en español con el tono correcto</span>
+          </div>
+          <div class="checklist-item" onclick="toggleCheck(this)">
+            <div class="check-box"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <span>Pregunta por los servicios y precios del consultorio</span>
+          </div>
+          <div class="checklist-item" onclick="toggleCheck(this)">
+            <div class="check-box"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <span>Pregunta por disponibilidad de horarios</span>
+          </div>
+          <div class="checklist-item" onclick="toggleCheck(this)">
+            <div class="check-box"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <span>Intenta agendar una cita</span>
+          </div>
+          <div class="checklist-item" onclick="toggleCheck(this)">
+            <div class="check-box"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <span>Intenta cancelar o reagendar la cita</span>
+          </div>
+          <div class="checklist-item" onclick="toggleCheck(this)">
+            <div class="check-box"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <span>Pregunta algo fuera de tema para verificar los límites</span>
+          </div>
+        </div>
+        <div class="services-section" id="servicesSection" style="display: none;">
+          <div class="services-label">Servicios configurados</div>
+          <div id="serviceChips"></div>
+        </div>
+      </div>
+
+      <!-- Agent summary -->
+      <div class="summary-card" id="summaryCard">
+        <div class="summary-row">
+          <span class="summary-label">Asistente</span>
+          <span class="summary-value teal" id="summaryAgent">—</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Especialidad</span>
+          <span class="summary-value" id="summarySpecialty">—</span>
+        </div>
+        <div class="summary-row" id="summaryVoiceRow" style="display: none;">
+          <span class="summary-label">Notas de voz</span>
+          <span class="summary-value teal">Activadas</span>
+        </div>
+        <div class="summary-row" id="summaryFbRow" style="display: none;">
+          <span class="summary-label">Facebook Messenger</span>
+          <span class="summary-value teal">Activado</span>
+        </div>
+      </div>
+
+      <!-- CTAs -->
+      <div class="cta-section">
+        <a id="ctaActivate" href="#" class="cta-primary">
+          Me gusta, activar →
+        </a>
+        <a id="ctaChanges" href="#" class="cta-secondary">
+          ¿Necesitas cambios? Escríbenos
+        </a>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="page-footer">
+      <div class="footer-brand">Prompt Maestro</div>
+      <a href="https://prompt-maestro.com/privacidad.html" class="footer-link" target="_blank">Aviso de Privacidad</a>
+    </div>
+
+  </div>
+
+  <script>
+    // === Config injected by Express server-side ===
+    const API_BASE = '{{API_BASE}}';
+
+    // === State ===
+    let doctorData = null;
+    let timerInterval = null;
+    const TRIAL_HOURS = 12;
+
+    // === Init ===
+    async function init() {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('token');
+
+      if (!token || token.length < 3) {
+        showError('Enlace inválido. Revisa tu correo para obtener el enlace correcto.');
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/api/validate-prueba`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token })
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          if (res.status === 403) {
+            showError('Este enlace no está habilitado. Tu agente aún se está construyendo.');
+          } else if (res.status === 404) {
+            showError('Doctor no encontrado. Verifica tu enlace.');
+          } else {
+            showError(err.error || 'Error al verificar tu sesión.');
+          }
+          return;
+        }
+
+        doctorData = await res.json();
+
+        // Route by pipeline_status
+        const status = doctorData.pipeline_status;
+
+        if (['pago_final_completo', 'en_produccion'].includes(status)) {
+          showCompleted();
+          return;
+        }
+
+        if (status === 'prueba_expirada') {
+          showExpired();
+          return;
+        }
+
+        // Check if trial is still valid (12h from pipeline_status_updated)
+        const trialValidStatuses = ['agente_listo_para_prueba', 'canales_activos'];
+        if (!trialValidStatuses.includes(status)) {
+          // Not ready for trial yet - show informational message
+          showError('Tu agente aún está en preparación. Recibirás un correo cuando esté listo para probar.');
+          return;
+        }
+
+        // Check 12h expiry
+        if (doctorData.pipeline_status_updated) {
+          const startTime = new Date(doctorData.pipeline_status_updated).getTime();
+          const now = Date.now();
+          const elapsed = now - startTime;
+          const limit = TRIAL_HOURS * 60 * 60 * 1000;
+
+          if (elapsed >= limit) {
+            showExpired();
+            return;
+          }
+        }
+
+        // All good — show trial page
+        showTrial();
+
+      } catch (err) {
+        console.error('Init error:', err);
+        showError('Error de conexión. Intenta recargar la página.');
+      }
+    }
+
+    // === Show states ===
+    function hideAll() {
+      document.querySelectorAll('[class^="state-"]').forEach(el => el.classList.remove('active'));
+    }
+
+    function showError(msg) {
+      hideAll();
+      document.getElementById('errorDetail').textContent = msg;
+      document.getElementById('stateError').classList.add('active');
+    }
+
+    function showExpired() {
+      hideAll();
+      const contactUrl = `https://wa.me/521${encodeURIComponent('5551234567')}?text=${encodeURIComponent('Hola, mi prueba de agente expiró. Mi ID: ' + (doctorData?.doctor_id || 'desconocido'))}`;
+      document.getElementById('expiredContactLink').href = `mailto:jose.cortes@prompt-maestro.com?subject=Prueba expirada - ${doctorData?.doctor_id || ''}&body=Hola, mi periodo de prueba ha expirado y me gustaría reactivarlo.`;
+      document.getElementById('stateExpired').classList.add('active');
+    }
+
+    function showCompleted() {
+      hideAll();
+      const status = doctorData?.pipeline_status;
+      if (status === 'en_produccion') {
+        document.getElementById('completedDetail').textContent =
+          '¡Tu asistente ya está activo y atendiendo pacientes! Revisa tu correo para más detalles.';
+      } else {
+        document.getElementById('completedDetail').textContent =
+          'Tu pago está confirmado. Tu asistente está en proceso de activación. Te notificaremos por correo cuando esté listo.';
+      }
+      document.getElementById('stateCompleted').classList.add('active');
+    }
+
+    function showTrial() {
+      hideAll();
+
+      const d = doctorData;
+
+      // Agent name
+      document.getElementById('agentNameBadge').textContent = d.agent_name || 'Tu asistente';
+      document.getElementById('summaryAgent').textContent = d.agent_name || '—';
+
+      // Specialty
+      const specMap = {
+        'dermatologia': 'Dermatología',
+        'odontologia': 'Odontología',
+        'ginecologia': 'Ginecología',
+        'pediatria': 'Pediatría',
+        'oftalmologia': 'Oftalmología',
+        'general': 'Medicina General'
+      };
+      document.getElementById('summarySpecialty').textContent = specMap[d.specialty] || d.specialty || '—';
+
+      // WhatsApp number
+      const phoneRaw = d.twilio_phone_number || d.wa_phone_number || '';
+      const phoneFormatted = formatPhoneDisplay(phoneRaw);
+      document.getElementById('waNumber').textContent = phoneFormatted;
+
+      // WhatsApp deep link
+      const phoneClean = phoneRaw.replace(/\D/g, '');
+      const waUrl = `https://wa.me/${phoneClean}?text=${encodeURIComponent('Hola')}`;
+      document.getElementById('waOpenLink').href = waUrl;
+
+      // Add-ons
+      if (d.addon_voice_transcription) {
+        document.getElementById('summaryVoiceRow').style.display = 'flex';
+        // Add voice check item
+        const voiceItem = createCheckItem('Envía una nota de voz y verifica que entienda el contenido');
+        document.getElementById('checklistItems').appendChild(voiceItem);
+      }
+      if (d.addon_fb_messenger) {
+        document.getElementById('summaryFbRow').style.display = 'flex';
+      }
+
+      // Services chips
+      try {
+        const services = JSON.parse(d.services_json || '[]');
+        if (services.length > 0) {
+          document.getElementById('servicesSection').style.display = 'block';
+          const container = document.getElementById('serviceChips');
+          services.forEach(s => {
+            const chip = document.createElement('span');
+            chip.className = 'service-chip';
+            chip.textContent = `${s.name} — $${s.price?.toLocaleString('es-MX') || '?'}`;
+            container.appendChild(chip);
+          });
+        }
+      } catch (e) { /* services parsing failed, skip */ }
+
+      // CTA
+      document.getElementById('ctaActivate').href =
+        `${API_BASE}/pago-final?token=${encodeURIComponent(d.doctor_id)}`;
+
+      // Changes link — mailto Jose
+      document.getElementById('ctaChanges').href =
+        `mailto:jose.cortes@prompt-maestro.com?subject=Ajustes en mi agente - ${d.doctor_id}&body=Hola Jose, estoy probando mi agente ${d.agent_name || ''} y me gustaría los siguientes cambios:%0A%0A`;
+
+      // Timer
+      startTimer();
+
+      document.getElementById('stateTrial').classList.add('active');
+    }
+
+    // === Timer ===
+    function startTimer() {
+      if (!doctorData?.pipeline_status_updated) return;
+
+      const startTime = new Date(doctorData.pipeline_status_updated).getTime();
+      const endTime = startTime + (TRIAL_HOURS * 60 * 60 * 1000);
+
+      function updateTimer() {
+        const now = Date.now();
+        const remaining = endTime - now;
+
+        if (remaining <= 0) {
+          clearInterval(timerInterval);
+          showExpired();
+          return;
+        }
+
+        const hours = Math.floor(remaining / (1000 * 60 * 60));
+        const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((remaining % (1000 * 60)) / 1000);
+
+        const display = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+        document.getElementById('timerDisplay').textContent = display;
+
+        // Progress bar
+        const total = TRIAL_HOURS * 60 * 60 * 1000;
+        const elapsed = now - startTime;
+        const pct = Math.max(0, ((total - elapsed) / total) * 100);
+        document.getElementById('timerBar').style.width = `${pct}%`;
+
+        // Color states
+        const card = document.getElementById('timerCard');
+        card.classList.remove('warning', 'critical');
+        if (remaining < 1 * 60 * 60 * 1000) {
+          card.classList.add('critical');
+        } else if (remaining < 3 * 60 * 60 * 1000) {
+          card.classList.add('warning');
+        }
+      }
+
+      updateTimer();
+      timerInterval = setInterval(updateTimer, 1000);
+    }
+
+    // === Helpers ===
+    function pad(n) {
+      return n.toString().padStart(2, '0');
+    }
+
+    function formatPhoneDisplay(raw) {
+      const digits = raw.replace(/\D/g, '');
+      if (digits.length === 12 && digits.startsWith('52')) {
+        // Mexican number: +52 XX XXXX XXXX
+        return `+${digits.slice(0,2)} ${digits.slice(2,4)} ${digits.slice(4,8)} ${digits.slice(8)}`;
+      } else if (digits.length === 11 && digits.startsWith('1')) {
+        // US number: +1 (XXX) XXX-XXXX
+        return `+1 (${digits.slice(1,4)}) ${digits.slice(4,7)}-${digits.slice(7)}`;
+      } else if (digits.length === 10) {
+        // 10-digit, assume US
+        return `+1 (${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+      }
+      return `+${digits}`;
+    }
+
+    function toggleCheck(el) {
+      el.classList.toggle('checked');
+    }
+
+    function createCheckItem(text) {
+      const div = document.createElement('div');
+      div.className = 'checklist-item';
+      div.onclick = function() { toggleCheck(this); };
+      div.innerHTML = `
+        <div class="check-box"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+        <span>${text}</span>
+      `;
+      return div;
+    }
+
+    // === Boot ===
+    init();
+  </script>
+</body>
+</html>
