@@ -1,6 +1,12 @@
 /**
  * PM Bridge — Prompt Maestro Twilio ↔ ElevenLabs Bridge Service
- * v1.5.0 — Pago final + T&C dinámicos (Tareas #16+#17)
+ * v1.6.0 — Production routing by To number (Tarea #20)
+ * 
+ * Changes from v1.5.0:
+ *   - MASTER_SHEET_LOOKUP_URL now defaults to n8n doctor-lookup-by-phone webhook
+ *   - Production routing: To number → n8n lookup → doctor config (was only Sandbox keywords)
+ *   - Both Sandbox (keyword) and Production (number) routing work simultaneously
+ *   - Version bump to 1.6.0
  * 
  * Endpoints:
  *   POST /webhook/twilio-bridge  — Twilio webhook (WhatsApp/SMS/FB messages)
@@ -28,7 +34,7 @@ const EL_API_KEY = process.env.ELEVENLABS_API_KEY;
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const BRIDGE_AUTH_TOKEN = process.env.BRIDGE_AUTH_TOKEN || "pm-bridge-secret-2026";
-const MASTER_SHEET_LOOKUP_URL = process.env.MASTER_SHEET_LOOKUP_URL; // n8n webhook URL to look up doctor by phone
+const MASTER_SHEET_LOOKUP_URL = process.env.MASTER_SHEET_LOOKUP_URL || "https://n8n-promptmaestro.sliplane.app/webhook/doctor-lookup-by-phone"; // v1.6.0: default to n8n webhook
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY; // For Whisper STT (voice transcription add-on)
 const N8N_BASE_URL = process.env.N8N_BASE_URL || "https://n8n-promptmaestro.sliplane.app";
 const PM_ROUTER_SECRET = process.env.PM_ROUTER_SECRET || "pm-router-secret-2026";
@@ -63,7 +69,7 @@ const doctorCache = new Map();
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    version: "1.5.0",
+    version: "1.6.0",
     uptime: process.uptime(),
     ...sessionManager.stats(),
   });
@@ -372,7 +378,7 @@ function parseChannel(twilioAddress) {
  * 2. Production mode: check in-memory cache, then n8n webhook → Master Sheet
  * 3. Cache result for 5 minutes
  * 
- * Returns: { doctor_id, agent_id, dynamic_variables }
+ * Returns: { doctor_id, agent_id, enable_voice_transcription, dynamic_variables }
  */
 async function lookupDoctor(toNumber, keyword) {
   // Normalize phone number (remove channel prefix)
@@ -408,12 +414,14 @@ async function lookupDoctor(toNumber, keyword) {
   // ── Production mode: cache check ──
   const cached = doctorCache.get(normalizedPhone);
   if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
+    console.log(`[Lookup] Cache hit for ${normalizedPhone} → ${cached.data.doctor_id}`);
     return cached.data;
   }
 
   // ── Production mode: look up via n8n webhook ──
   if (MASTER_SHEET_LOOKUP_URL) {
     try {
+      console.log(`[Lookup] Production lookup for ${normalizedPhone} via n8n`);
       const resp = await fetch(MASTER_SHEET_LOOKUP_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -422,8 +430,10 @@ async function lookupDoctor(toNumber, keyword) {
       const data = await resp.json();
       if (data.agent_id) {
         doctorCache.set(normalizedPhone, { data, ts: Date.now() });
+        console.log(`[Lookup] Found: ${data.doctor_id} (${data.agent_name}) — cached for 5min`);
         return data;
       }
+      console.log(`[Lookup] Doctor not found for ${normalizedPhone}`);
     } catch (err) {
       console.error(`[Lookup] Failed to look up doctor for ${normalizedPhone}:`, err.message);
     }
@@ -635,6 +645,7 @@ app.post("/api/validate-prueba", async (req, res) => {
       "canales_activos",
       "prueba_expirada",
       "pago_final_completo",
+      "whatsapp_pendiente_aprobacion",
       "en_produccion",
     ];
 
@@ -732,13 +743,14 @@ app.post("/api/create-checkout-final", async (req, res) => {
 
 // --- Start server ---
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`PM Bridge v1.5.0 running on port ${PORT}`);
+  console.log(`PM Bridge v1.6.0 running on port ${PORT}`);
   console.log(`  Twilio webhook: POST /webhook/twilio-bridge`);
   console.log(`  Chat API:       POST /chat`);
   console.log(`  Interview:      GET  /entrevista`);
   console.log(`  Trial page:     GET  /prueba`);
   console.log(`  Payment:        GET  /pago-final`);
   console.log(`  Health:         GET  /health`);
+  console.log(`  Doctor lookup:  ${MASTER_SHEET_LOOKUP_URL ? 'ACTIVE' : 'DISABLED'}`);
   console.log(`  Sandbox doctor: ${process.env.SANDBOX_DOCTOR_ID || "PM-TEST-001"}`);
   console.log(`  Sandbox agent:  ${process.env.SANDBOX_AGENT_ID || "agent_7001kkf42e44f3ethezn15t0dh11"}`);
   const mapKeys = Object.keys(sandboxDoctorMap);
