@@ -1,6 +1,6 @@
 /**
  * PM Bridge — Prompt Maestro Twilio ↔ ElevenLabs Bridge Service
- * v1.4.0 — Trial page + pago-final placeholder (Tarea #13)
+ * v1.5.0 — Pago final + T&C dinámicos (Tareas #16+#17)
  * 
  * Endpoints:
  *   POST /webhook/twilio-bridge  — Twilio webhook (WhatsApp/SMS/FB messages)
@@ -12,7 +12,8 @@
  *   POST /api/skip-calendar      — Doctor skips Calendar OAuth
  *   GET  /prueba                 — Trial page with 12h timer (Tarea #13)
  *   POST /api/validate-prueba    — Validate doctor for trial page
- *   GET  /pago-final             — Payment page placeholder (Tarea #16)
+ *   GET  /pago-final             — Payment page with dynamic pricing + T&C (Tarea #16+#17)
+ *   POST /api/create-checkout-final — Proxy to create Stripe Checkout Session
  */
 
 const express = require("express");
@@ -62,7 +63,7 @@ const doctorCache = new Map();
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    version: "1.4.0",
+    version: "1.5.0",
     uptime: process.uptime(),
     ...sessionManager.stats(),
   });
@@ -667,41 +668,71 @@ app.post("/api/validate-prueba", async (req, res) => {
   }
 });
 
+// ==========================================================================
+// Payment Page Routes (Tasks #16 + #17)
+// ==========================================================================
+
 /**
- * GET /pago-final — Payment page placeholder (Tarea #16)
- * Query: ?token=PM-xxx
- * Will be replaced with dynamic Stripe Checkout in Sprint 5
+ * GET /pago-final — Serve the payment page with dynamic pricing + T&C
+ * Query: ?token=PM-xxx (doctor_id)
+ * Shows: agent summary, payment breakdown, T&C checkbox, Stripe Checkout button
  */
+const pagoFinalTemplate = fs.readFileSync(
+  path.join(__dirname, "pages", "pago-final.html"),
+  "utf-8"
+);
+
 app.get("/pago-final", (req, res) => {
-  res.type("text/html; charset=utf-8").send(`<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pago Final — Prompt Maestro</title>
-  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Outfit:wght@400;600&display=swap" rel="stylesheet">
-  <style>
-    body { font-family: 'Outfit', sans-serif; background: #0b1030; color: #c8cde0; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-    .card { text-align: center; max-width: 400px; padding: 40px; }
-    h1 { font-family: 'Playfair Display', serif; color: #e6e9f0; font-size: 24px; margin-bottom: 12px; }
-    p { line-height: 1.6; font-size: 15px; }
-    .badge { display: inline-block; background: rgba(0,201,167,0.15); color: #00c9a7; padding: 6px 16px; border-radius: 100px; font-size: 13px; margin-top: 16px; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>Próximamente</h1>
-    <p>La página de pago final estará disponible pronto. Por ahora, contacta a Jose para activar tu agente.</p>
-    <a href="mailto:jose.cortes@prompt-maestro.com" style="color: #00c9a7;">jose.cortes@prompt-maestro.com</a>
-    <div class="badge">Tarea #16 — Sprint 5</div>
-  </div>
-</body>
-</html>`);
+  const proto = req.headers["x-forwarded-proto"] || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers["host"] || "pm-bridge.sliplane.app";
+  const apiBase = `${proto}://${host}`;
+
+  const html = pagoFinalTemplate
+    .replace(/%%API_BASE%%/g, JSON.stringify(apiBase).slice(1, -1));
+
+  res.type("text/html; charset=utf-8").send(html);
+});
+
+/**
+ * POST /api/create-checkout-final — Create Stripe Checkout Session for pago final
+ * Body: { doctor_id: "PM-xxx", terms_accepted: true }
+ * Proxies to n8n create-checkout-final workflow (adds X-PM-Auth)
+ * Returns: { ok: true, checkout_url: "https://checkout.stripe.com/..." }
+ */
+app.post("/api/create-checkout-final", async (req, res) => {
+  try {
+    const { doctor_id, terms_accepted } = req.body || {};
+
+    if (!doctor_id || !terms_accepted) {
+      return res.status(400).json({ error: "doctor_id and terms_accepted are required" });
+    }
+
+    const response = await fetch(`${N8N_BASE_URL}/webhook/create-checkout-final`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-PM-Auth": PM_ROUTER_SECRET,
+      },
+      body: JSON.stringify({ doctor_id, terms_accepted }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || data.error) {
+      console.error(`[create-checkout-final] Error: ${data.message || response.status}`);
+      return res.status(response.status || 400).json(data);
+    }
+
+    res.json(data);
+  } catch (err) {
+    console.error("[create-checkout-final] Proxy error:", err.message);
+    res.status(502).json({ error: "Failed to create checkout session" });
+  }
 });
 
 // --- Start server ---
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`PM Bridge v1.4.0 running on port ${PORT}`);
+  console.log(`PM Bridge v1.5.0 running on port ${PORT}`);
   console.log(`  Twilio webhook: POST /webhook/twilio-bridge`);
   console.log(`  Chat API:       POST /chat`);
   console.log(`  Interview:      GET  /entrevista`);
