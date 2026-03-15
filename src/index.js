@@ -1,10 +1,18 @@
 /**
  * PM Bridge — Prompt Maestro Twilio ↔ ElevenLabs Bridge Service
+ * v1.4.0 — Trial page + pago-final placeholder (Tarea #13)
  * 
  * Endpoints:
  *   POST /webhook/twilio-bridge  — Twilio webhook (WhatsApp/SMS/FB messages)
  *   POST /chat                   — Internal API for n8n or direct calls
  *   GET  /health                 — Health check with session stats
+ *   GET  /entrevista             — Interview page (Tarea #12)
+ *   POST /api/validate-token     — Validate doctor token (entrevista)
+ *   POST /api/entrevista-chat    — Proxy to entrevistador-agent
+ *   POST /api/skip-calendar      — Doctor skips Calendar OAuth
+ *   GET  /prueba                 — Trial page with 12h timer (Tarea #13)
+ *   POST /api/validate-prueba    — Validate doctor for trial page
+ *   GET  /pago-final             — Payment page placeholder (Tarea #16)
  */
 
 const express = require("express");
@@ -54,6 +62,7 @@ const doctorCache = new Map();
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
+    version: "1.4.0",
     uptime: process.uptime(),
     ...sessionManager.stats(),
   });
@@ -566,12 +575,138 @@ app.post("/api/skip-calendar", async (req, res) => {
   }
 });
 
+// ==========================================================================
+// Trial Page Routes (Task #13)
+// ==========================================================================
+
+/**
+ * GET /prueba — Serve the trial page with 12h countdown timer
+ * Query: ?token=PM-xxx (doctor_id)
+ * Validates doctor status, shows agent info, WhatsApp number, checklist
+ */
+const pruebaTemplate = fs.readFileSync(
+  path.join(__dirname, "pages", "prueba.html"),
+  "utf-8"
+);
+
+app.get("/prueba", (req, res) => {
+  const proto = req.headers["x-forwarded-proto"] || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers["host"] || "pm-bridge.sliplane.app";
+  const apiBase = `${proto}://${host}`;
+
+  const html = pruebaTemplate
+    .replace(/'{{API_BASE}}'/g, JSON.stringify(apiBase));
+
+  res.type("text/html; charset=utf-8").send(html);
+});
+
+/**
+ * POST /api/validate-prueba — Validate doctor for trial page
+ * Body: { token: "PM-xxx" }
+ * Proxies to n8n, filters by trial-eligible statuses, strips sensitive data
+ */
+app.post("/api/validate-prueba", async (req, res) => {
+  try {
+    const { token } = req.body || {};
+
+    if (!token) {
+      return res.status(400).json({ error: "token is required" });
+    }
+
+    const response = await fetch(`${N8N_BASE_URL}/webhook/validate-interview-token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-PM-Auth": PM_ROUTER_SECRET,
+      },
+      body: JSON.stringify({ lead_id: token }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(response.status).json(data);
+    }
+
+    // Security: only allow trial-eligible or post-trial statuses
+    const trialEligible = [
+      "agente_listo_para_prueba",
+      "canales_activos",
+      "prueba_expirada",
+      "pago_final_completo",
+      "en_produccion",
+    ];
+
+    if (!trialEligible.includes(data.pipeline_status)) {
+      return res.status(403).json({ error: "agent_not_ready_for_trial" });
+    }
+
+    // Strip sensitive fields — only send what the frontend needs
+    const safeData = {
+      valid: data.valid,
+      doctor_id: data.doctor_id,
+      doctor_name: data.doctor_name,
+      specialty: data.specialty,
+      pipeline_status: data.pipeline_status,
+      pipeline_status_updated: data.pipeline_status_updated,
+      agent_name: data.agent_name,
+      twilio_phone_number: data.twilio_phone_number,
+      wa_phone_number: data.wa_phone_number,
+      addon_voice_transcription: data.addon_voice_transcription,
+      addon_fb_messenger: data.addon_fb_messenger,
+      monthly_total: data.monthly_total,
+      first_month_total: data.first_month_total,
+      services_json: data.services_json,
+      business_hours_json: data.business_hours_json,
+    };
+
+    return res.json(safeData);
+  } catch (err) {
+    console.error("[validate-prueba] Error:", err.message);
+    return res.status(500).json({ error: "internal_error" });
+  }
+});
+
+/**
+ * GET /pago-final — Payment page placeholder (Tarea #16)
+ * Query: ?token=PM-xxx
+ * Will be replaced with dynamic Stripe Checkout in Sprint 5
+ */
+app.get("/pago-final", (req, res) => {
+  res.type("text/html; charset=utf-8").send(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pago Final — Prompt Maestro</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Outfit:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Outfit', sans-serif; background: #0b1030; color: #c8cde0; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+    .card { text-align: center; max-width: 400px; padding: 40px; }
+    h1 { font-family: 'Playfair Display', serif; color: #e6e9f0; font-size: 24px; margin-bottom: 12px; }
+    p { line-height: 1.6; font-size: 15px; }
+    .badge { display: inline-block; background: rgba(0,201,167,0.15); color: #00c9a7; padding: 6px 16px; border-radius: 100px; font-size: 13px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Próximamente</h1>
+    <p>La página de pago final estará disponible pronto. Por ahora, contacta a Jose para activar tu agente.</p>
+    <a href="mailto:jose.cortes@prompt-maestro.com" style="color: #00c9a7;">jose.cortes@prompt-maestro.com</a>
+    <div class="badge">Tarea #16 — Sprint 5</div>
+  </div>
+</body>
+</html>`);
+});
+
 // --- Start server ---
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`PM Bridge running on port ${PORT}`);
+  console.log(`PM Bridge v1.4.0 running on port ${PORT}`);
   console.log(`  Twilio webhook: POST /webhook/twilio-bridge`);
   console.log(`  Chat API:       POST /chat`);
   console.log(`  Interview:      GET  /entrevista`);
+  console.log(`  Trial page:     GET  /prueba`);
+  console.log(`  Payment:        GET  /pago-final`);
   console.log(`  Health:         GET  /health`);
   console.log(`  Sandbox doctor: ${process.env.SANDBOX_DOCTOR_ID || "PM-TEST-001"}`);
   console.log(`  Sandbox agent:  ${process.env.SANDBOX_AGENT_ID || "agent_7001kkf42e44f3ethezn15t0dh11"}`);
