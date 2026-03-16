@@ -1,12 +1,11 @@
 /**
  * PM Bridge — Prompt Maestro Twilio ↔ ElevenLabs Bridge Service
- * v1.6.0 — Production routing by To number (Tarea #20)
+ * v1.7.0 — Stripe Connect onboarding proxy (Tarea #25)
  * 
- * Changes from v1.5.0:
- *   - MASTER_SHEET_LOOKUP_URL now defaults to n8n doctor-lookup-by-phone webhook
- *   - Production routing: To number → n8n lookup → doctor config (was only Sandbox keywords)
- *   - Both Sandbox (keyword) and Production (number) routing work simultaneously
- *   - Version bump to 1.6.0
+ * Changes from v1.6.0:
+ *   - POST /api/stripe-connect-onboarding — proxy to n8n stripe-connect-onboarding
+ *   - POST /api/stripe-connect-status — proxy to n8n validate-interview-token, returns Stripe status
+ *   - Version bump to 1.7.0
  * 
  * Endpoints:
  *   POST /webhook/twilio-bridge  — Twilio webhook (WhatsApp/SMS/FB messages)
@@ -20,6 +19,8 @@
  *   POST /api/validate-prueba    — Validate doctor for trial page
  *   GET  /pago-final             — Payment page with dynamic pricing + T&C (Tarea #16+#17)
  *   POST /api/create-checkout-final — Proxy to create Stripe Checkout Session
+ *   POST /api/stripe-connect-onboarding — Proxy to n8n Stripe Connect onboarding (Tarea #25)
+ *   POST /api/stripe-connect-status — Check if doctor has Stripe Connect configured (Tarea #25)
  */
 
 const express = require("express");
@@ -69,7 +70,7 @@ const doctorCache = new Map();
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    version: "1.6.0",
+    version: "1.7.0",
     uptime: process.uptime(),
     ...sessionManager.stats(),
   });
@@ -587,6 +588,92 @@ app.post("/api/skip-calendar", async (req, res) => {
 });
 
 // ==========================================================================
+// Stripe Connect Routes (Task #25)
+// ==========================================================================
+
+/**
+ * POST /api/stripe-connect-onboarding — Initiate Stripe Connect onboarding
+ * Body: { doctor_id: "PM-xxx" }
+ * Proxies to n8n stripe-connect-onboarding workflow (adds X-PM-Auth)
+ * Returns: { ok: true, onboarding_url: "https://connect.stripe.com/..." }
+ */
+app.post("/api/stripe-connect-onboarding", async (req, res) => {
+  try {
+    const { doctor_id } = req.body || {};
+
+    if (!doctor_id) {
+      return res.status(400).json({ error: "doctor_id is required" });
+    }
+
+    const response = await fetch(`${N8N_BASE_URL}/webhook/stripe-connect-onboarding`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-PM-Auth": PM_ROUTER_SECRET,
+      },
+      body: JSON.stringify({ doctor_id }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || data.error) {
+      console.error(`[stripe-connect-onboarding] Error: ${data.message || response.status}`);
+      return res.status(response.status || 400).json(data);
+    }
+
+    res.json(data);
+  } catch (err) {
+    console.error("[stripe-connect-onboarding] Proxy error:", err.message);
+    res.status(502).json({ error: "Failed to initiate Stripe Connect onboarding" });
+  }
+});
+
+/**
+ * POST /api/stripe-connect-status — Check Stripe Connect status for a doctor
+ * Body: { doctor_id: "PM-xxx" }
+ * Reads Master Sheet via n8n validate-interview-token and returns Stripe fields
+ * Returns: { connected: true/false, stripe_connect_id: "acct_xxx", stripe_connect_status: "active" }
+ */
+app.post("/api/stripe-connect-status", async (req, res) => {
+  try {
+    const { doctor_id } = req.body || {};
+
+    if (!doctor_id) {
+      return res.status(400).json({ error: "doctor_id is required" });
+    }
+
+    // Use validate-interview-token to read doctor data from Sheet
+    const response = await fetch(`${N8N_BASE_URL}/webhook/validate-interview-token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-PM-Auth": PM_ROUTER_SECRET,
+      },
+      body: JSON.stringify({ doctor_id }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || data.error) {
+      // If validate-interview-token fails, return not connected
+      return res.json({ connected: false, stripe_connect_id: null, stripe_connect_status: null });
+    }
+
+    const connectId = data.stripe_connect_id || null;
+    const connectStatus = data.stripe_connect_status || null;
+
+    res.json({
+      connected: !!connectId,
+      stripe_connect_id: connectId,
+      stripe_connect_status: connectStatus,
+    });
+  } catch (err) {
+    console.error("[stripe-connect-status] Error:", err.message);
+    res.status(502).json({ error: "Failed to check Stripe Connect status" });
+  }
+});
+
+// ==========================================================================
 // Trial Page Routes (Task #13)
 // ==========================================================================
 
@@ -743,13 +830,15 @@ app.post("/api/create-checkout-final", async (req, res) => {
 
 // --- Start server ---
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`PM Bridge v1.6.0 running on port ${PORT}`);
+  console.log(`PM Bridge v1.7.0 running on port ${PORT}`);
   console.log(`  Twilio webhook: POST /webhook/twilio-bridge`);
   console.log(`  Chat API:       POST /chat`);
   console.log(`  Interview:      GET  /entrevista`);
   console.log(`  Trial page:     GET  /prueba`);
   console.log(`  Payment:        GET  /pago-final`);
   console.log(`  Health:         GET  /health`);
+  console.log(`  Stripe Connect: POST /api/stripe-connect-onboarding`);
+  console.log(`  Stripe Status:  POST /api/stripe-connect-status`);
   console.log(`  Doctor lookup:  ${MASTER_SHEET_LOOKUP_URL ? 'ACTIVE' : 'DISABLED'}`);
   console.log(`  Sandbox doctor: ${process.env.SANDBOX_DOCTOR_ID || "PM-TEST-001"}`);
   console.log(`  Sandbox agent:  ${process.env.SANDBOX_AGENT_ID || "agent_7001kkf42e44f3ethezn15t0dh11"}`);
