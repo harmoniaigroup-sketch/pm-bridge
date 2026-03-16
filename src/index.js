@@ -649,7 +649,7 @@ app.post("/api/stripe-connect-status", async (req, res) => {
         "Content-Type": "application/json",
         "X-PM-Auth": PM_ROUTER_SECRET,
       },
-      body: JSON.stringify({ doctor_id }),
+      body: JSON.stringify({ lead_id: doctor_id }),
     });
 
     const data = await response.json();
