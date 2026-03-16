@@ -20,6 +20,8 @@
       --success-green: #10b981;
       --warning-amber: #f59e0b;
       --error-red: #ef4444;
+      --stripe-purple: #635bff;
+      --stripe-purple-hover: #5349e0;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -280,7 +282,7 @@
 
     .chat-send-btn svg { width: 20px; height: 20px; }
 
-    /* Post-interview panel */
+    /* Post-interview panels */
     .post-interview {
       display: none;
       padding: 24px 16px;
@@ -329,6 +331,30 @@
 
     .btn-calendar svg { width: 22px; height: 22px; }
 
+    .btn-stripe {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 28px;
+      background: var(--stripe-purple);
+      color: var(--white);
+      font-family: 'Outfit', sans-serif;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.2s, transform 0.1s;
+      margin-bottom: 12px;
+    }
+
+    .btn-stripe:hover { background: var(--stripe-purple-hover); }
+    .btn-stripe:active { transform: scale(0.97); }
+    .btn-stripe:disabled { background: #9ca3af; cursor: default; transform: none; }
+
+    .btn-stripe svg { width: 22px; height: 22px; }
+
     .btn-skip {
       display: block;
       margin: 0 auto;
@@ -344,6 +370,15 @@
     }
 
     .btn-skip:hover { color: #6b7280; }
+
+    .stripe-status-text {
+      font-size: 0.82rem;
+      color: var(--success-green);
+      margin-top: 8px;
+      display: none;
+    }
+
+    .stripe-status-text.visible { display: block; }
 
     /* Completed state */
     .completed-panel {
@@ -429,9 +464,9 @@
       </div>
     </div>
 
-    <!-- Post-interview: Calendar OAuth -->
-    <div class="post-interview" id="postInterview">
-      <div class="post-interview__title">¡Excelente! Último paso</div>
+    <!-- Post-interview Step 1: Calendar OAuth -->
+    <div class="post-interview" id="postInterviewCalendar">
+      <div class="post-interview__title">Paso 1 de 2: Google Calendar</div>
       <div class="post-interview__subtitle">Conecta tu Google Calendar para que tu asistente pueda consultar disponibilidad y agendar citas automáticamente.</div>
       <a class="btn-calendar" id="btnCalendar" href="#">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -442,7 +477,22 @@
         </svg>
         Conectar Google Calendar
       </a>
-      <button class="btn-skip" id="btnSkip">Saltar este paso →</button>
+      <button class="btn-skip" id="btnSkipCalendar">Saltar este paso →</button>
+    </div>
+
+    <!-- Post-interview Step 2: Stripe Connect -->
+    <div class="post-interview" id="postInterviewStripe">
+      <div class="post-interview__title">Paso 2 de 2: Cobros a pacientes</div>
+      <div class="post-interview__subtitle">Conecta Stripe para que tu asistente pueda cobrar anticipos a pacientes automáticamente. El dinero llega directo a tu cuenta. Stripe cobra ~3.6% + $3 MXN por transacción — nosotros no cobramos comisión.</div>
+      <button class="btn-stripe" id="btnStripe">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
+          <line x1="1" y1="10" x2="23" y2="10"></line>
+        </svg>
+        Conectar cobros
+      </button>
+      <div class="stripe-status-text" id="stripeStatusText">✅ Cobros configurados correctamente</div>
+      <button class="btn-skip" id="btnSkipStripe">Saltar — mi asistente funcionará sin cobro en línea →</button>
     </div>
 
     <!-- Input area -->
@@ -465,7 +515,7 @@
     </div>
   </div>
 
-  <!-- Completed panel (shown after Calendar connect or skip) -->
+  <!-- Completed panel (shown after all steps done) -->
   <div class="completed-panel hidden" id="completedPanel">
     <div class="completed-panel__icon">✅</div>
     <div class="completed-panel__title">¡Todo listo!</div>
@@ -486,6 +536,7 @@
     let sessionId = null;
     let interviewComplete = false;
     let sending = false;
+    let stripePollingInterval = null;
 
     // ── DOM ──
     const $ = id => document.getElementById(id);
@@ -497,9 +548,13 @@
     const chatSendBtn = $('chatSendBtn');
     const chatInputArea = $('chatInputArea');
     const typingIndicator = $('typingIndicator');
-    const postInterview = $('postInterview');
+    const postInterviewCalendar = $('postInterviewCalendar');
+    const postInterviewStripe = $('postInterviewStripe');
     const btnCalendar = $('btnCalendar');
-    const btnSkip = $('btnSkip');
+    const btnSkipCalendar = $('btnSkipCalendar');
+    const btnStripe = $('btnStripe');
+    const btnSkipStripe = $('btnSkipStripe');
+    const stripeStatusText = $('stripeStatusText');
     const completedPanel = $('completedPanel');
     const headerDoctor = $('headerDoctor');
 
@@ -546,10 +601,10 @@
         ];
 
         if (completedStatuses.includes(data.pipeline_status)) {
-          // Already past interview — show completed or Calendar step
           if (data.pipeline_status === 'entrevista_completa') {
+            // Interview done but no permissions yet — show Calendar step
             showChat();
-            showPostInterview();
+            showCalendarStep();
           } else {
             showCompleted('Tu asistente ya está en proceso de construcción. Recibirás un correo cuando esté listo para probar.');
           }
@@ -583,19 +638,31 @@
       chatInput.focus();
     }
 
-    function showPostInterview() {
+    // ── Post-interview flow: Calendar → Stripe → Completed ──
+
+    function showCalendarStep() {
       interviewComplete = true;
       chatInputArea.classList.add('hidden');
-      postInterview.classList.add('visible');
+      postInterviewCalendar.classList.add('visible');
 
-      // Build Calendar OAuth URL
       if (doctorData) {
         const calendarOAuthUrl = buildCalendarOAuthUrl(doctorData.doctor_id);
         btnCalendar.href = calendarOAuthUrl;
       }
     }
 
+    function showStripeStep() {
+      postInterviewCalendar.classList.remove('visible');
+      postInterviewStripe.classList.add('visible');
+    }
+
     function showCompleted(text) {
+      // Clean up any polling
+      if (stripePollingInterval) {
+        clearInterval(stripePollingInterval);
+        stripePollingInterval = null;
+      }
+
       loadingScreen.classList.add('hidden');
       chatContainer.classList.add('hidden');
       completedPanel.classList.remove('hidden');
@@ -616,19 +683,98 @@
       return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
     }
 
+    // ── Stripe Connect ──
+
+    async function initiateStripeConnect() {
+      if (!doctorData) return;
+
+      btnStripe.disabled = true;
+      btnStripe.innerHTML = '<div class="spinner" style="width:20px;height:20px;border-width:2px;"></div> Conectando...';
+
+      try {
+        const resp = await fetch(`${API_BASE}/api/stripe-connect-onboarding`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ doctor_id: doctorData.doctor_id }),
+        });
+
+        const data = await resp.json();
+
+        if (data.ok && data.onboarding_url) {
+          // Start polling before redirect (will continue when doctor returns)
+          startStripePolling();
+          // Redirect to Stripe onboarding
+          window.location.href = data.onboarding_url;
+        } else if (data.error && data.message && data.message.includes('already has stripe_connect_id')) {
+          // Doctor already connected — show success
+          stripeConnected();
+        } else {
+          btnStripe.disabled = false;
+          btnStripe.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg> Conectar cobros`;
+          addMessage('Hubo un problema al conectar con Stripe. Por favor intenta de nuevo.', 'system');
+        }
+      } catch (err) {
+        console.error('Stripe connect error:', err);
+        btnStripe.disabled = false;
+        btnStripe.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg> Conectar cobros`;
+        addMessage('Error de conexión al intentar configurar cobros. Intenta de nuevo.', 'system');
+      }
+    }
+
+    function startStripePolling() {
+      if (stripePollingInterval) return;
+
+      stripePollingInterval = setInterval(async () => {
+        try {
+          const resp = await fetch(`${API_BASE}/api/stripe-connect-status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ doctor_id: doctorData.doctor_id }),
+          });
+
+          const data = await resp.json();
+
+          if (data.connected && data.stripe_connect_id) {
+            stripeConnected();
+          }
+        } catch (err) {
+          console.warn('Stripe polling error (non-blocking):', err);
+        }
+      }, 3000); // Poll every 3 seconds
+    }
+
+    function stripeConnected() {
+      if (stripePollingInterval) {
+        clearInterval(stripePollingInterval);
+        stripePollingInterval = null;
+      }
+
+      btnStripe.classList.add('hidden');
+      btnSkipStripe.classList.add('hidden');
+      stripeStatusText.classList.add('visible');
+
+      // Update local state
+      if (doctorData) {
+        doctorData.stripe_connected = true;
+      }
+
+      // Auto-advance to completed after a brief moment
+      setTimeout(() => {
+        showCompleted('¡Cobros configurados! Estamos construyendo tu asistente. Recibirás un correo en los próximos minutos con el link para probarla.');
+      }, 2000);
+    }
+
     // ── Chat functions ──
 
     function addMessage(text, type) {
       const div = document.createElement('div');
       div.className = `message message--${type}`;
-      // Convert basic markdown-like formatting
       div.innerHTML = formatText(text);
       chatMessages.insertBefore(div, typingIndicator);
       scrollToBottom();
     }
 
     function formatText(text) {
-      // Basic formatting: **bold**, newlines
       return text
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
@@ -656,7 +802,6 @@
       chatSendBtn.disabled = true;
       chatInput.disabled = true;
 
-      // Show user message (skip for auto-greeting)
       if (!isAutoGreeting) {
         addMessage(text, 'user');
       }
@@ -702,9 +847,8 @@
           addMessage(data.response, 'agent');
         }
 
-        // Check if interview is complete
         if (data.profile_complete) {
-          showPostInterview();
+          showCalendarStep();
         }
 
       } catch (err) {
@@ -742,11 +886,11 @@
       chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
     }
 
-    // ── Calendar / Skip handlers ──
+    // ── Calendar handlers ──
 
-    btnSkip.addEventListener('click', async () => {
-      btnSkip.disabled = true;
-      btnSkip.textContent = 'Procesando...';
+    btnSkipCalendar.addEventListener('click', async () => {
+      btnSkipCalendar.disabled = true;
+      btnSkipCalendar.textContent = 'Procesando...';
 
       try {
         await fetch(`${API_BASE}/api/skip-calendar`, {
@@ -758,17 +902,74 @@
         console.warn('Skip calendar call failed (non-blocking):', e);
       }
 
-      showCompleted('Tu asistente se construirá usando los horarios que configuraste en la entrevista. Recibirás un correo cuando esté listo.');
+      // Move to Stripe step
+      showStripeStep();
+    });
+
+    // ── Stripe handlers ──
+
+    btnStripe.addEventListener('click', () => {
+      initiateStripeConnect();
+    });
+
+    btnSkipStripe.addEventListener('click', () => {
+      showCompleted('Tu asistente se construirá sin cobro en línea. Los pacientes podrán consultar precios y horarios, pero deberán contactar al consultorio para agendar. Puedes activar cobros después por email.');
     });
 
     // ── Check for OAuth callback return ──
     function checkOAuthReturn() {
       const params = new URLSearchParams(window.location.search);
+
+      // Calendar OAuth return
       if (params.get('calendar_connected') === 'true') {
-        showCompleted('¡Google Calendar conectado exitosamente! Estamos construyendo tu asistente. Recibirás un correo en los próximos minutos.');
+        // Calendar connected — show Stripe step next
+        loadingScreen.classList.add('hidden');
+        chatContainer.classList.remove('hidden');
+        interviewComplete = true;
+        chatInputArea.classList.add('hidden');
+
+        // Attempt to get doctor_id from token param to check Stripe status
+        const token = params.get('token') || params.get('state');
+        if (token) {
+          doctorData = { doctor_id: token };
+          // Check if Stripe already connected
+          checkExistingStripeStatus().then(alreadyConnected => {
+            if (alreadyConnected) {
+              showCompleted('¡Google Calendar y cobros configurados! Estamos construyendo tu asistente. Recibirás un correo en los próximos minutos.');
+            } else {
+              showStripeStep();
+            }
+          });
+        } else {
+          showStripeStep();
+        }
         return true;
       }
+
+      // Stripe return (doctor comes back from Stripe onboarding)
+      // The return_url points to /entrevista?token=DOCTOR_ID
+      // We detect this by checking if stripe_connect_id exists now
+      if (params.get('token') && !params.get('calendar_connected')) {
+        // Could be a Stripe return — we'll check during normal init
+        return false;
+      }
+
       return false;
+    }
+
+    async function checkExistingStripeStatus() {
+      if (!doctorData?.doctor_id) return false;
+      try {
+        const resp = await fetch(`${API_BASE}/api/stripe-connect-status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ doctor_id: doctorData.doctor_id }),
+        });
+        const data = await resp.json();
+        return data.connected === true;
+      } catch (e) {
+        return false;
+      }
     }
 
     // ── Start ──
