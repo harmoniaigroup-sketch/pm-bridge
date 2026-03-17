@@ -1,11 +1,10 @@
 /**
  * PM Bridge — Prompt Maestro Twilio ↔ ElevenLabs Bridge Service
- * v1.7.0 — Stripe Connect onboarding proxy (Tarea #25)
+ * v1.7.1 — Patient payment success page (H14)
  * 
- * Changes from v1.6.0:
- *   - POST /api/stripe-connect-onboarding — proxy to n8n stripe-connect-onboarding
- *   - POST /api/stripe-connect-status — proxy to n8n validate-interview-token, returns Stripe status
- *   - Version bump to 1.7.0
+ * Changes from v1.7.0:
+ *   - GET /pago-paciente-exitoso — Success page after patient pays anticipo via Stripe Checkout
+ *   - Version bump to 1.7.1
  * 
  * Endpoints:
  *   POST /webhook/twilio-bridge  — Twilio webhook (WhatsApp/SMS/FB messages)
@@ -21,6 +20,7 @@
  *   POST /api/create-checkout-final — Proxy to create Stripe Checkout Session
  *   POST /api/stripe-connect-onboarding — Proxy to n8n Stripe Connect onboarding (Tarea #25)
  *   POST /api/stripe-connect-status — Check if doctor has Stripe Connect configured (Tarea #25)
+ *   GET  /pago-paciente-exitoso  — Patient payment success page (H14)
  */
 
 const express = require("express");
@@ -70,7 +70,7 @@ const doctorCache = new Map();
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    version: "1.7.0",
+    version: "1.7.1",
     uptime: process.uptime(),
     ...sessionManager.stats(),
   });
@@ -828,14 +828,33 @@ app.post("/api/create-checkout-final", async (req, res) => {
   }
 });
 
+// ==========================================================================
+// Patient Payment Success Page (H14)
+// ==========================================================================
+
+/**
+ * GET /pago-paciente-exitoso — Success page after patient pays anticipo
+ * Query: ?session_id=cs_xxx (Stripe Checkout Session ID)
+ * Static page — the webhook already handled Calendar + WA notifications server-side.
+ * This page is purely UX for the patient to see a confirmation.
+ */
+app.get("/pago-paciente-exitoso", (req, res) => {
+  const html = fs.readFileSync(
+    path.join(__dirname, "pages", "pago-paciente-exitoso.html"),
+    "utf-8"
+  );
+  res.type("text/html; charset=utf-8").send(html);
+});
+
 // --- Start server ---
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`PM Bridge v1.7.0 running on port ${PORT}`);
+  console.log(`PM Bridge v1.7.1 running on port ${PORT}`);
   console.log(`  Twilio webhook: POST /webhook/twilio-bridge`);
   console.log(`  Chat API:       POST /chat`);
   console.log(`  Interview:      GET  /entrevista`);
   console.log(`  Trial page:     GET  /prueba`);
   console.log(`  Payment:        GET  /pago-final`);
+  console.log(`  Patient success: GET /pago-paciente-exitoso`);
   console.log(`  Health:         GET  /health`);
   console.log(`  Stripe Connect: POST /api/stripe-connect-onboarding`);
   console.log(`  Stripe Status:  POST /api/stripe-connect-status`);
