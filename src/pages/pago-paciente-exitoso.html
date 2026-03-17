@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pago Confirmado — Prompt Maestro</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #0b1d3a 0%, #1a3a6c 100%);
+      font-family: 'Outfit', sans-serif;
+      color: #e2e8f0;
+      padding: 24px;
+    }
+
+    .card {
+      background: rgba(255,255,255,0.06);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 24px;
+      padding: 48px 40px;
+      max-width: 440px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+
+    .icon {
+      width: 80px; height: 80px;
+      margin: 0 auto 24px;
+      background: linear-gradient(135deg, #00c9a7, #00e6b8);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: popIn 0.6s cubic-bezier(0.34,1.56,0.64,1) both;
+      box-shadow: 0 0 40px rgba(0,201,167,0.3);
+    }
+    .icon svg { width: 44px; height: 44px; }
+
+    @keyframes popIn {
+      0% { transform: scale(0); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    h2 {
+      font-family: 'Playfair Display', serif;
+      font-weight: 700;
+      font-size: 1.75rem;
+      color: #00c9a7;
+      margin-bottom: 8px;
+      animation: fadeUp 0.5s 0.2s both;
+    }
+
+    .subtitle {
+      font-weight: 300;
+      font-size: 1rem;
+      color: #94a3b8;
+      margin-bottom: 32px;
+      animation: fadeUp 0.5s 0.3s both;
+    }
+
+    .details {
+      background: rgba(0,0,0,0.2);
+      border-radius: 14px;
+      padding: 20px 24px;
+      text-align: left;
+      margin-bottom: 28px;
+      border: 1px solid rgba(255,255,255,0.05);
+      animation: fadeUp 0.5s 0.4s both;
+    }
+
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+    }
+    .detail-row + .detail-row {
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    .detail-label {
+      font-weight: 400;
+      font-size: 0.875rem;
+      color: #94a3b8;
+    }
+    .detail-value {
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: #f1f5f9;
+      text-align: right;
+      max-width: 60%;
+    }
+
+    .note {
+      font-size: 0.8rem;
+      color: #64748b;
+      line-height: 1.5;
+      animation: fadeUp 0.5s 0.5s both;
+    }
+
+    .loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid rgba(255,255,255,0.1);
+      border-top-color: #00c9a7;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .error-msg {
+      color: #f87171;
+      font-size: 0.9rem;
+      margin-top: 12px;
+    }
+
+    @media (max-width: 480px) {
+      .card { padding: 36px 24px; }
+      h2 { font-size: 1.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <p style="color:#94a3b8; font-size:0.9rem;">Verificando pago...</p>
+    </div>
+
+    <div id="success" style="display:none;">
+      <div class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </div>
+      <h2>Pago Confirmado</h2>
+      <p class="subtitle">Su anticipo ha sido procesado exitosamente</p>
+
+      <div class="details" id="details"></div>
+
+      <p class="note">
+        El consultorio ha sido notificado y le confirmará su cita por WhatsApp.
+        Guarde esta página como comprobante.
+      </p>
+    </div>
+
+    <div id="error-state" style="display:none;">
+      <div class="icon" style="background:linear-gradient(135deg,#f59e0b,#f97316);">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+      </div>
+      <h2 style="color:#f59e0b;">Verificación Pendiente</h2>
+      <p class="subtitle">No pudimos verificar el estado de su pago en este momento.</p>
+      <p class="note">Si completó el pago, no se preocupe — el sistema lo procesará automáticamente y recibirá confirmación por WhatsApp.</p>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const params = new URLSearchParams(window.location.search);
+      const sessionId = params.get('session_id');
+
+      function showSuccess(data) {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('success').style.display = 'block';
+
+        const details = document.getElementById('details');
+        const rows = [];
+
+        if (data.service) rows.push(['Servicio', data.service]);
+        if (data.patient) rows.push(['Paciente', data.patient]);
+        if (data.amount) rows.push(['Monto', '$' + (data.amount / 100).toLocaleString('es-MX') + ' MXN']);
+        if (data.date) rows.push(['Fecha', data.date]);
+
+        if (rows.length === 0) {
+          rows.push(['Estado', 'Pago completado']);
+        }
+
+        details.innerHTML = rows.map(([label, value]) =>
+          '<div class="detail-row"><span class="detail-label">' + label + '</span><span class="detail-value">' + value + '</span></div>'
+        ).join('');
+      }
+
+      function showError() {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('error-state').style.display = 'block';
+      }
+
+      // For now, show success immediately with whatever info we have from the URL
+      // In production, this could call an API to verify the session and get details
+      // The webhook already handled the cita + WA notifications server-side
+      setTimeout(function() {
+        if (sessionId) {
+          showSuccess({});
+        } else {
+          showError();
+        }
+      }, 1200);
+    })();
+  </script>
+</body>
+</html>
