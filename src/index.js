@@ -1,10 +1,12 @@
 /**
  * PM Bridge — Prompt Maestro Twilio ↔ ElevenLabs Bridge Service
- * v1.7.1 — Patient payment success page (H14)
+ * v1.8.0 — Fix B36-4: Inject system__timezone for ElevenLabs system__time
  * 
- * Changes from v1.7.0:
- *   - GET /pago-paciente-exitoso — Success page after patient pays anticipo via Stripe Checkout
- *   - Version bump to 1.7.1
+ * Changes from v1.7.1:
+ *   - Fix B36-4: All doctor lookup paths now include system__timezone: "America/Mexico_City"
+ *     in dynamic_variables. This enables ElevenLabs' built-in {{system__time}} variable
+ *     to resolve correctly, fixing the agent thinking it's Oct 2023.
+ *   - Version bump to 1.8.0
  * 
  * Endpoints:
  *   POST /webhook/twilio-bridge  — Twilio webhook (WhatsApp/SMS/FB messages)
@@ -70,7 +72,7 @@ const doctorCache = new Map();
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    version: "1.7.1",
+    version: "1.8.0",
     uptime: process.uptime(),
     ...sessionManager.stats(),
   });
@@ -380,6 +382,9 @@ function parseChannel(twilioAddress) {
  * 3. Cache result for 5 minutes
  * 
  * Returns: { doctor_id, agent_id, enable_voice_transcription, dynamic_variables }
+ * 
+ * v1.8.0: All paths inject system__timezone into dynamic_variables so ElevenLabs'
+ * built-in {{system__time}} resolves to Mexico timezone (fixes B36-4).
  */
 async function lookupDoctor(toNumber, keyword) {
   // Normalize phone number (remove channel prefix)
@@ -396,7 +401,10 @@ async function lookupDoctor(toNumber, keyword) {
         doctor_id: mapped.doctor_id,
         agent_id: mapped.agent_id,
         enable_voice_transcription: mapped.enable_voice_transcription || false,
-        dynamic_variables: { doctor_id: mapped.doctor_id },
+        dynamic_variables: {
+          doctor_id: mapped.doctor_id,
+          system__timezone: "America/Mexico_City", // B36-4 fix: enables {{system__time}}
+        },
       };
     }
 
@@ -407,6 +415,7 @@ async function lookupDoctor(toNumber, keyword) {
       enable_voice_transcription: process.env.SANDBOX_ENABLE_VOICE === "true",
       dynamic_variables: {
         doctor_id: process.env.SANDBOX_DOCTOR_ID || "PM-TEST-001",
+        system__timezone: "America/Mexico_City", // B36-4 fix: enables {{system__time}}
       },
     };
     return defaultDoctor;
@@ -430,6 +439,15 @@ async function lookupDoctor(toNumber, keyword) {
       });
       const data = await resp.json();
       if (data.agent_id) {
+        // B36-4 fix: inject system__timezone into dynamic_variables from n8n
+        if (data.dynamic_variables) {
+          data.dynamic_variables.system__timezone = data.dynamic_variables.system__timezone || "America/Mexico_City";
+        } else {
+          data.dynamic_variables = {
+            doctor_id: data.doctor_id,
+            system__timezone: "America/Mexico_City",
+          };
+        }
         doctorCache.set(normalizedPhone, { data, ts: Date.now() });
         console.log(`[Lookup] Found: ${data.doctor_id} (${data.agent_name}) — cached for 5min`);
         return data;
@@ -848,7 +866,7 @@ app.get("/pago-paciente-exitoso", (req, res) => {
 
 // --- Start server ---
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`PM Bridge v1.7.1 running on port ${PORT}`);
+  console.log(`PM Bridge v1.8.0 running on port ${PORT}`);
   console.log(`  Twilio webhook: POST /webhook/twilio-bridge`);
   console.log(`  Chat API:       POST /chat`);
   console.log(`  Interview:      GET  /entrevista`);
