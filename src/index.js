@@ -1,8 +1,9 @@
 /**
  * PM Bridge — Prompt Maestro Twilio ↔ ElevenLabs Bridge Service
- * v1.8.0 — Fix B36-4: Inject system__timezone for ElevenLabs system__time
+ * v1.9.0 — Inject caller_phone for tools + Fix B36-4: Inject system__timezone for ElevenLabs system__time
  * 
  * Changes from v1.7.1:
+ *   - v1.9.0: Inject caller_phone into dynamic_variables (real patient phone from Twilio From)
  *   - Fix B36-4: All doctor lookup paths now include system__timezone: "America/Mexico_City"
  *     in dynamic_variables. This enables ElevenLabs' built-in {{system__time}} variable
  *     to resolve correctly, fixing the agent thinking it's Oct 2023.
@@ -187,6 +188,14 @@ app.post("/webhook/twilio-bridge", async (req, res) => {
     // If still no text (e.g., non-audio media like image), use a descriptive fallback
     if (!messageText) {
       messageText = "[El paciente envió un archivo multimedia que no puedo procesar]";
+    }
+
+    // v1.9.0: Inject caller_phone so agent can pass real patient phone to tools
+    const callerPhone = (From || "").replace("whatsapp:", "");
+    if (doctor.dynamic_variables) {
+      doctor.dynamic_variables.caller_phone = callerPhone;
+    } else {
+      doctor.dynamic_variables = { caller_phone: callerPhone };
     }
 
     const agentResponse = await sessionManager.sendMessage({
